@@ -115,6 +115,12 @@ dataset; it is not a snapshot/cursor guarantee while rows are being inserted.
 - Queue name: `__wf:steps` (`DEFAULT_QUEUE_NAME`, `engine.ts:23`).
 - Every top-level node is enqueued as job name `wf:step` with `StepJobData`
   payload. Inline branch, parallel and loop steps run within that node job.
+- The internal Queue sets `defaultJobOptions.removeOnComplete = true`. Successful
+  node jobs are transport records, so their payload and result are discarded
+  after ACK; the authoritative execution state and step results remain in
+  `WorkflowStore`. This default covers ordinary advancement, recovery, signal
+  resumes and timeout resumes in both embedded and TCP modes. Failed queue jobs
+  retain the standard queue policy because `removeOnFail` is not enabled.
 
 ### Events emitted (`WorkflowEventType`) — 15 total
 

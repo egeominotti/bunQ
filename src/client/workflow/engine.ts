@@ -37,6 +37,7 @@ export class Engine {
       connection: opts.connection,
       embedded: opts.embedded,
       dataPath: opts.dataPath,
+      defaultJobOptions: { removeOnComplete: true },
     });
 
     this.store = new WorkflowStore(opts.dataPath);

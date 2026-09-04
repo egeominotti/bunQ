@@ -128,6 +128,18 @@ def test_worker_roundtrip() -> None:
             assert queue.get_result(job_id)["doubled"] in range(0, 20, 2)
 
 
+def test_worker_completion_signals_a_saturated_poll_loop() -> None:
+    worker = Worker("slot-signal", lambda _job: None, autorun=False)
+    try:
+        with worker._active_lock:
+            worker._active["job-1"] = "token-1"
+        assert not worker._slot_available.is_set()
+        worker._finish_job("job-1")
+        assert worker._slot_available.wait(0)
+    finally:
+        worker.close()
+
+
 def test_worker_failure_goes_to_dlq() -> None:
     with _queue("pytest-fail") as queue:
         job = queue.add("boom", {"x": 1}, attempts=1)

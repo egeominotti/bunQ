@@ -89,6 +89,7 @@ class Worker(EventEmitter, WorkerRuntime):
         self._active: Dict[str, str] = {}  # job id -> lock token
         self._cancelled: Dict[str, Optional[str]] = {}  # job id -> reason
         self._active_lock = threading.Lock()
+        self._slot_available = threading.Event()
         self._stop = threading.Event()
         self._paused = threading.Event()
         self._ready = threading.Event()
@@ -242,18 +243,3 @@ class Worker(EventEmitter, WorkerRuntime):
     def is_job_cancelled(self, job_id: str) -> bool:
         with self._active_lock:
             return job_id in self._cancelled
-
-    def _shutdown(self) -> None:
-        if self._executor is not None:
-            self._executor.shutdown(wait=True)
-            self._executor = None
-        # Flush AFTER the executor drained: the last in-flight jobs buffer
-        # their ACKs during shutdown(wait=True); send them before closing.
-        if self._ack_batcher is not None:
-            self._ack_batcher.flush()
-        self._safe_call({"cmd": "UnregisterWorker", "workerId": self.worker_id})
-        self.connection.close()
-        already_closed = self._closed
-        self._closed = True
-        if not already_closed:
-            self.emit("closed")

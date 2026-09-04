@@ -16,6 +16,19 @@ head:
 
 ## Unreleased
 
+### Queue and SDK performance
+
+- Flow creation now batches its telemetry writes after the atomic graph commit,
+  preserving per-node routing and event order while removing repeated storage
+  transaction overhead.
+- Workflow-engine control jobs now use `removeOnComplete` by default, so
+  completed internal orchestration jobs do not consume the shared completed-job
+  retention budget. User workflow jobs and workflow state remain unchanged.
+- The TypeScript and Python network SDKs now wake saturated pull loops as soon
+  as a job settles. In the native 20,000-job workload, median Worker time fell
+  by 48.3% and 76.2% respectively without changing ACK/FAIL, heartbeat, lease,
+  concurrency, or shutdown semantics.
+
 ### PostgreSQL performance
 
 - Batched worker heartbeats now renew every valid fenced lease in one

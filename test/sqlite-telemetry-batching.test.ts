@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { QueueManager } from '../src/application/queueManager';
 import { QueueTelemetryJournal } from '../src/application/queueTelemetryJournal';
+import { jobId } from '../src/domain/types/job';
 import { EventType, type JobEvent } from '../src/domain/types/queue';
 import { SqliteStorage } from '../src/infrastructure/persistence/sqlite';
 
@@ -145,6 +146,12 @@ describe('SQLite telemetry batching', () => {
 
       expect(storage.countQueueEvents('fallback')).toBe(2);
       expect(storage.getQueueMetrics('fallback', 'completed', 10).meta.count).toBe(2);
+      expect(
+        db
+          .query<{ job_id: string }, []>('SELECT job_id FROM queue_events ORDER BY id')
+          .all()
+          .map((row) => row.job_id)
+      ).toEqual(['good-1', 'good-2']);
     } finally {
       storage.close();
     }
@@ -234,14 +241,24 @@ describe('SQLite telemetry batching', () => {
       const pulled = await manager.pullBatch('routing', ids.length);
       const firstCompletion = manager.waitForJobCompletion(pulled[0].id, 1_000);
       await manager.ackBatch(pulled.map((job) => job.id));
+      const flowIds = Array.from({ length: 6 }, (_, index) => jobId(`routing-flow-${index}`));
+      await manager.pushFlow({
+        jobs: flowIds.map((id, index) => ({
+          id,
+          queue: 'routing-flow',
+          input: { data: { index }, durable: true },
+        })),
+      });
 
-      expect(batchCalls).toBe(3);
+      expect(batchCalls).toBe(4);
       expect(singleCalls).toBe(0);
       expect(observed.map((entry) => entry.eventType)).toEqual([
         ...Array(8).fill(EventType.Pushed),
         ...Array(8).fill(EventType.Pulled),
         ...Array(8).fill(EventType.Completed),
+        ...Array(6).fill(EventType.Pushed),
       ]);
+      expect(observed.slice(-flowIds.length).map((entry) => entry.jobId)).toEqual(flowIds);
       expect(manager.getQueueMetrics('routing', 'completed').meta.count).toBe(8);
       expect(await firstCompletion).toBe(true);
     } finally {

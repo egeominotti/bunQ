@@ -179,6 +179,12 @@ visible after the whole graph is present. Notifications, events, throughput,
 and latency metrics run after lock release. There is no `await` inside the
 synchronous publication section.
 
+The post-commit `pushed` events use one ordered `broadcastBatch` call for the
+whole graph. Durable SQLite telemetry can therefore commit the event journal in
+one transaction, while ordinary subscribers and webhooks still receive one
+event per job in graph order. Contexts without the optional batch hook retain
+the scalar one-event-at-a-time fallback.
+
 The server returns the committed job snapshots. The client verifies cardinality
 and exact ID equality before constructing `JobNode` objects.
 

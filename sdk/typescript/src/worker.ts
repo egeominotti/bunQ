@@ -14,6 +14,7 @@ import { Job } from './job.js';
 import type { PulledJobsResponse } from './responses.js';
 import { terminalOutcomeWasApplied } from './terminal-outcome.js';
 import { WorkerBase } from './worker-base.js';
+import { SlotSignal } from './worker-slot-signal.js';
 import {
   MAX_STACK_LINES,
   type Processor,
@@ -25,6 +26,7 @@ import {
 export class Worker<T = unknown, R = unknown> extends WorkerBase<T, R> {
   private readonly processor: Processor<T, R>;
   private readonly ackBatcher: AckBatcher | null;
+  private readonly slotSignal = new SlotSignal();
 
   constructor(queue: string, processor: Processor<T, R>, opts: WorkerOptions = {}) {
     super(queue, opts);
@@ -84,7 +86,7 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase<T, R> {
   private async pollOnce(): Promise<void> {
     const free = this.concurrency - this.active.size;
     if (free <= 0) {
-      await sleep(20);
+      await this.slotSignal.wait(20);
       return;
     }
 
@@ -195,6 +197,7 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase<T, R> {
   private finishJob(id: string): void {
     this.active.delete(id);
     this.cancelledJobs.delete(id);
+    this.slotSignal.notify();
   }
 
   // --------------------------------------------------------------- heartbeat

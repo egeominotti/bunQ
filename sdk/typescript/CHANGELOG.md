@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Wake the saturated Worker pull loop when an ACK or FAIL releases a
+  concurrency slot, retaining the existing 20 ms fallback while avoiding a
+  full polling delay between completion waves.
 - Treat broker-authoritative late `ACK`/`FAIL` outcomes as ignored rather than
   locally completed or failed. Batched ACKs now use `ignoredIndices`, so
   duplicate job IDs are settled by input position without false events or

@@ -132,14 +132,14 @@ export async function pushFlowBatch(
       ctx.totalPushed.value += BigInt(jobs.length);
       throughputTracker.pushRate.increment(jobs.length);
       const timestamp = Date.now();
-      for (const job of jobs) {
-        ctx.broadcast({
-          eventType: EventType.Pushed,
-          queue: job.queue,
-          jobId: job.id,
-          timestamp,
-        });
-      }
+      const events = jobs.map((job) => ({
+        eventType: EventType.Pushed,
+        queue: job.queue,
+        jobId: job.id,
+        timestamp,
+      }));
+      if (ctx.broadcastBatch) ctx.broadcastBatch(events);
+      else for (const event of events) ctx.broadcast(event);
       ctx.dashboardEmit?.('flow:pushed', {
         jobs: jobs.length,
         queues: notifications.size,

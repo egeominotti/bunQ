@@ -37,7 +37,8 @@ class WorkerRuntime:
         with self._active_lock:
             free = self.concurrency - len(self._active)
         if free <= 0:
-            self._stop.wait(0.05)
+            self._slot_available.wait(0.05)
+            self._slot_available.clear()
             return
 
         # The registration is per-connection server state: after a reconnect
@@ -154,6 +155,7 @@ class WorkerRuntime:
         with self._active_lock:
             self._active.pop(job_id, None)
             self._cancelled.pop(job_id, None)
+        self._slot_available.set()
 
     def _heartbeat_loop(self) -> None:
         while not self._stop.wait(self.heartbeat_interval_s):
@@ -228,3 +230,18 @@ class WorkerRuntime:
             logger.warning("swallowed %s failure: %s", command.get("cmd"), exc)
             self.emit("error", exc)
             return None
+
+    def _shutdown(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+        # Flush AFTER the executor drained: the last in-flight jobs buffer
+        # their ACKs during shutdown(wait=True); send them before closing.
+        if self._ack_batcher is not None:
+            self._ack_batcher.flush()
+        self._safe_call({"cmd": "UnregisterWorker", "workerId": self.worker_id})
+        self.connection.close()
+        already_closed = self._closed
+        self._closed = True
+        if not already_closed:
+            self.emit("closed")

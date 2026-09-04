@@ -27,7 +27,7 @@
     "build": "tsc -p tsconfig.json",
     "prepublishOnly": "bun run build",
     "test": "bun tests/e2e.ts",
-    "test:property": "bun test tests/flow-plan.property.test.ts tests/flow-identity.property.test.ts tests/flow-plan.validation.test.ts tests/flow-plan.limits.test.ts tests/flow-plan.contract.test.ts tests/flow-commit.test.ts",
+    "test:property": "bun test tests/flow-plan.property.test.ts tests/flow-identity.property.test.ts tests/flow-plan.validation.test.ts tests/flow-plan.limits.test.ts tests/flow-plan.contract.test.ts tests/flow-commit.test.ts tests/worker-slot-signal.test.ts",
     "test:integration": "bun tests/integration.ts",
     "test:soak": "bun tests/soak.ts",
     "lint": "oxlint src tests",

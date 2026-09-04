@@ -153,6 +153,32 @@ Events may contain endpoint, generation, command name, request id, duration,
 outcome, and sanitized error text. They must never contain authentication
 tokens, job payloads, job results, private keys, or CA contents.
 
+## Saturated worker wake-up
+
+The TypeScript and Python workers use a one-shot completion signal while all
+local concurrency slots are occupied. A settled ACK/FAIL wakes the pull loop
+immediately; the previous 20 ms (TypeScript) and 50 ms (Python) waits remain as
+bounded fallbacks. This changes only local poll scheduling: PULLB limits, lease
+tokens, heartbeat membership, ACK/FAIL authority, events, counters, and close
+ordering are unchanged.
+
+The change was selected from a native three-round A/B campaign on an Apple M1
+Max with 20,000 trivial jobs, concurrency and pull width 64, ACK batching width
+64, 10,000 flow nodes, and fresh broker/database state for every process. The
+median TypeScript Worker phase fell from 8,164.67 ms to 4,219.41 ms (-48.3%;
+2,449.6 to 4,739.9 jobs/s), while Python fell from 19,676.10 ms to 4,683.93 ms
+(-76.2%; 1,016.5 to 4,269.9 jobs/s). Median process user+system CPU fell from
+0.73 s to 0.65 s for TypeScript and from 1.44 s to 1.09 s for Python.
+
+Equivalent candidates were rejected when the same A/B did not justify a code
+change: the Go wake signal made its Worker phase 3.1% slower; suppressing Rust's
+per-job heartbeat thread changed Worker time by only -0.4%; and caching Elixir
+worker registration saved only 0.7% while increasing retired instructions.
+PHP's sampled profile was dominated by socket polling and exposed no
+application self-time hotspot. These clients therefore retain their existing
+lifecycle behavior until a separately measured optimization clears the same
+bar.
+
 ## Test layers
 
 Native regression suites cover protocol encoding, option mapping, failure

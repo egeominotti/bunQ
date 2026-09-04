@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Wake the saturated Worker pull loop when an ACK or FAIL releases a
+  concurrency slot, retaining the existing 50 ms fallback while avoiding a
+  full polling delay between completion waves.
 - Treat broker ACK/FAIL outcomes as authoritative after a timeout race. A
   successful `applied: false` response now suppresses false Worker terminal
   events and counters without reporting an error. Batched ACKs honor

@@ -6,7 +6,7 @@
  */
 
 import { createServer } from 'node:net';
-import { FlowProducer, Queue } from '../dist/index.js';
+import { FlowProducer, Queue } from '../dist/legacy.js';
 import {
   assert,
   assertEq,

@@ -43,8 +43,8 @@ await app.add('send', { to: 'alice@example.com' });
 ```typescript
 import { Bunqueue } from 'bunqueue-client';
 
-// connects to localhost:6789 (embedded mode is Bun-only)
 const app = new Bunqueue<{ to: string }>('emails', {
+  embedded: false,
   processor: async (job) => {
     console.log(`Sending to ${job.data.to}`);
     return { sent: true };
@@ -130,6 +130,7 @@ await app.add('send-sms', { to: 'bob' });
 
 ```typescript
 const app = new Bunqueue<{ to: string }>('notifications', {
+  embedded: false,
   routes: {
     'send-email': async (job) => {
       await sendEmail(job.data.to);
@@ -319,7 +320,7 @@ const app = new Bunqueue('db-inserts', {
 
 ```typescript
 const app = new Bunqueue('db-inserts', {
-  concurrency: 50,  // batched jobs hold their slot until the batch flushes
+  embedded: false,
   batch: {
     size: 50,        // flush every 50 jobs
     timeout: 2000,   // or every 2 seconds, whichever comes first
@@ -406,6 +407,7 @@ const app = new Bunqueue('api-calls', {
 
 ```typescript
 const app = new Bunqueue('api-calls', {
+  embedded: false,
   processor: async (job) => {
     const res = await fetch(job.data.url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -505,6 +507,7 @@ app.cancel(job.id, 5000);  // cancel after 5s grace period
 
 ```typescript
 const app = new Bunqueue('encoding', {
+  embedded: false,
   processor: async (job) => {
     const signal = app.getSignal(job.id);
     for (const chunk of chunks) {
@@ -604,6 +607,7 @@ app.resetCircuit();     // force close + resume worker
 
 ```typescript
 const app = new Bunqueue('payments', {
+  embedded: false,
   processor: async (job) => paymentGateway.charge(job.data),
   circuitBreaker: {
     threshold: 5,         // open (pause) after 5 consecutive failures
@@ -699,6 +703,7 @@ app.trigger({
 
 ```typescript
 const app = new Bunqueue('orders', {
+  embedded: false,
   routes: {
     'place-order': async (job) => ({ orderId: job.data.id, total: 99 }),
     'send-receipt': async (job) => ({ sent: true }),
@@ -806,6 +811,7 @@ app.setNameTtl('flash-sale', 30000);
 
 ```typescript
 const app = new Bunqueue('otp', {
+  embedded: false,
   processor: async (job) => verifyOTP(job.data.code),
   ttl: {
     defaultTtl: 300000,           // 5 minutes for all jobs
@@ -893,6 +899,7 @@ const app = new Bunqueue('tasks', {
 
 ```typescript
 const app = new Bunqueue('tasks', {
+  embedded: false,
   processor: async (job) => ({ done: true }),
   priorityAging: {
     interval: 60000,    // check every 60s
@@ -974,6 +981,7 @@ await app.add('hook', { event: 'user.updated', userId: '123' }); // different da
 
 ```typescript
 const app = new Bunqueue('webhooks', {
+  embedded: false,
   processor: async (job) => processWebhook(job.data),
   deduplication: {
     ttl: 60000,       // dedup window: 60 seconds
@@ -1063,23 +1071,23 @@ app.removeGlobalRateLimit();
 
 ```typescript
 const app = new Bunqueue('api', {
+  embedded: false,
   processor: async (job) => callExternalAPI(job.data),
-  rateLimit: { max: 100, duration: 1000 },  // max 100 job starts per second
+  rateLimit: { max: 100, duration: 1000 },  // max 100 jobs per second
 });
 
-// Per-group limiting (e.g. per customer). With groupKey set, each group gets
-// its own sliding window: max 10 starts per second per customerId value.
+// Per-group limiting (e.g. per customer). With groupKey set, `max` becomes
+// a per-group concurrency cap (max active jobs per group) and duration is ignored.
 const app2 = new Bunqueue('api', {
+  embedded: false,
   processor: async (job) => callAPI(job.data),
   rateLimit: { max: 10, duration: 1000, groupKey: 'customerId' },
 });
 
-// Runtime updates (server-side queue limit)
-await app.setGlobalRateLimit(50, 1000);
-await app.removeGlobalRateLimit();
+// Runtime updates
+await app.setGlobalRateLimitAsync(50, 1000);
+await app.removeGlobalRateLimitAsync();
 ```
-
-*In `bunqueue-client` the constructor limiter is enforced client-side (sliding window per group); `setGlobalRateLimit` sets the server-side queue limit.*
 
 </TabItem>
 <TabItem label="Python">
@@ -1166,6 +1174,7 @@ app.setDlqConfig({ autoRetry: false });
 
 ```typescript
 const app = new Bunqueue('critical', {
+  embedded: false,
   processor: async (job) => riskyOperation(job.data),
   dlq: {
     autoRetry: true,            // re-queue failed jobs periodically
@@ -1177,15 +1186,15 @@ const app = new Bunqueue('critical', {
 });
 
 // Query
-const entries = await app.getDlq();
-const stats = await app.getDlqStats();                    // { total, byReason }
-const timeouts = await app.getDlq({ reason: 'timeout' });
+const entries = await app.getDlqAsync();
+const stats = await app.getDlqStatsAsync();                    // { total, byReason, ... }
+const timeouts = await app.getDlqAsync({ reason: 'timeout' });
 
 // Act
-await app.retryDlq();           // retry all
-await app.retryDlq('job-id');   // retry one
-await app.purgeDlq();           // clear all
-await app.setDlqConfig({ autoRetry: false });
+await app.retryDlqAsync();           // retry all
+await app.retryDlqAsync('job-id');   // retry one
+await app.purgeDlqAsync();           // clear all
+await app.setDlqConfigAsync({ autoRetry: false });
 ```
 
 </TabItem>
@@ -1333,7 +1342,7 @@ app.worker.concurrency = 20;
 // Events (same as Worker)
 app.on('completed', (job, result) => { });
 app.on('failed', (job, error) => { });
-// also: active, progress, error, ready, drained, closed
+// also: active, progress, stalled, error, ready, drained, closed
 
 // Control
 app.pause();           // pause queue + worker
@@ -1343,7 +1352,8 @@ await app.close(true); // force shutdown
 app.isRunning(); app.isPaused(); app.isClosed();
 
 // Escape hatch: the underlying Queue and Worker are yours
-await app.queue.setStallConfig({ stallInterval: 30000 });
+await app.queue.setStallConfigAsync({ stallInterval: 30000 });
+app.worker.concurrency = 20;
 ```
 
 </TabItem>
@@ -1442,6 +1452,7 @@ process.on('SIGINT', async () => {
 import { Bunqueue } from 'bunqueue-client';
 
 const app = new Bunqueue<{ payload: string }>('my-app', {
+  embedded: false,
   routes: {
     'process': async (job) => ({ id: job.data.payload, status: 'done' }),
     'notify': async (job) => ({ sent: true }),
@@ -1472,8 +1483,8 @@ app
 await app.cron('cleanup', '0 2 * * *', { payload: 'nightly' });
 await app.add('process', { payload: 'ORD-001' });
 
-process.on('SIGINT', () => {
-  void app.close();
+process.on('SIGINT', async () => {
+  await app.close();
 });
 ```
 
@@ -1548,7 +1559,7 @@ Simple Mode ships in the TypeScript and Python SDKs only. In Elixir, compose `Qu
 
 ## API reference
 
-*The tables below describe the TypeScript surface of the Bun package. The TypeScript client (`bunqueue-client`) exposes the same camelCase surface minus `embedded` (TCP only; DLQ filter/stats computed client-side). The Python SDK mirrors it in snake_case (`get_job_counts`, `set_default_ttl`, `priority_aging`, ...), with these differences: `embedded` is unavailable (TCP only), DLQ queries and rate-limit updates live on `app.queue`, and `getDlqStats` is not available yet.*
+*The tables below describe the shared TypeScript surface of `bunqueue/client` and `bunqueue-client`. Node.js and Deno use `embedded: false`; await the `Async` variants for authoritative remote queries and mutations. DLQ filtering and statistics come from the broker. The Python SDK mirrors the baseline in snake_case (`get_job_counts`, `set_default_ttl`, `priority_aging`, ...): embedded mode is unavailable, DLQ queries and rate-limit updates live on `app.queue`, and `getDlqStats` is not available yet.*
 
 ### Constructor options
 

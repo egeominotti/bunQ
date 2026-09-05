@@ -69,6 +69,8 @@ test('flow commit reports a missing response envelope through snapshot validatio
     call: async () => ({ ok: true }),
   } as unknown as ConnectionLike;
   const jobs = [{ id: 'one', queue: 'queue', input: { data: { name: 'one' } } }];
+  // Bun's assertion types return void, but awaiting rejects keeps failures in this test.
+  // oxlint-disable-next-line typescript/await-thenable
   await expect(commitFlow(connection, jobs)).rejects.toThrow(
     'Invalid PUSHF response: committed job snapshots are missing'
   );

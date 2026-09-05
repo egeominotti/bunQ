@@ -56,9 +56,9 @@ queue.setStallConfig({
 ```typescript
 import { Queue } from 'bunqueue-client';
 
-const queue = new Queue('my-queue');
+const queue = new Queue('my-queue', { embedded: false });
 
-await queue.setStallConfig({
+await queue.setStallConfigAsync({
   enabled: true,         // on by default
   stallInterval: 30000,  // stalled after 30s without a heartbeat
   maxStalls: 3,          // move to DLQ after 3 stalls
@@ -159,7 +159,8 @@ const worker = new Worker('queue', processor, {
 
 ```typescript
 const worker = new Worker('queue', processor, {
-  heartbeatIntervalS: 10, // heartbeat every 10 seconds (default, 0 = disabled)
+  embedded: false,
+  heartbeatInterval: 10000, // heartbeat every 10 seconds (default)
 });
 ```
 
@@ -248,9 +249,9 @@ const worker = new Worker('video-processing', async (job) => {
 
 ```typescript
 // Video processing may take hours
-const videoQueue = new Queue('video-processing');
+const videoQueue = new Queue('video-processing', { embedded: false });
 
-await videoQueue.setStallConfig({
+await videoQueue.setStallConfigAsync({
   stallInterval: 300000,  // 5 minutes
   maxStalls: 2,
   gracePeriod: 60000,
@@ -261,7 +262,7 @@ const worker = new Worker('video-processing', async (job) => {
     await processChunk(chunk);
     await job.updateProgress(chunk.progress); // also counts as a heartbeat
   }
-}, { heartbeatIntervalS: 30 });
+}, { embedded: false, heartbeatInterval: 30000 });
 ```
 
 </TabItem>
@@ -392,12 +393,17 @@ events.on('stalled', ({ jobId }) => {
 </TabItem>
 <TabItem label="Node.js / Deno">
 
-The network SDK does not receive broker-side stall events. Subscribe to the
-queue's SSE stream and handle frames whose SSE `event` name is `job:stalled`
-(the JSON `data` carries `queue`, `jobId`, `timestamp`):
+```typescript
+import { QueueEvents } from 'bunqueue-client';
 
-```bash
-curl -N http://localhost:6790/events/queues/my-queue
+const events = new QueueEvents('my-queue', {
+  embedded: false,
+  connection: { host: '127.0.0.1', port: 6789 },
+});
+await events.waitUntilReady();
+events.on('stalled', ({ jobId }) => {
+  console.log(`Job ${jobId} stalled`);
+});
 ```
 
 </TabItem>
@@ -458,9 +464,9 @@ curl -N http://localhost:6790/events/queues/my-queue
 </TabItem>
 </Tabs>
 
-The Bun `Worker` also emits `stalled` in both embedded and TCP modes. Its TCP
+The shared TypeScript `Worker` also emits `stalled` in embedded and TCP modes. Its TCP
 path uses the same dedicated authenticated broker subscription as QueueEvents
-and re-subscribes after reconnect. External network SDKs should use SSE or
+and re-subscribes after reconnect. The other language SDKs should use SSE or
 WebSocket for this broker-side event. Stall webhooks are not emitted, so do not
 register `job.stalled` as a webhook event. This notification is preserved when
 an expired lease consumes the final `maxStalls` or `maxAttempts` slot: the
@@ -483,9 +489,10 @@ const stalledJobs = queue.getDlq({ reason: 'stalled' });
 <TabItem label="Node.js / Deno">
 
 ```typescript
-// getDlq() returns raw jobs; the `reason` field lives on the DLQ entry,
-// which this SDK does not expose. Use the Bun client to filter by reason.
-const jobs = await queue.getDlq();
+const stats = await queue.getDlqStatsAsync();
+console.log('Stalled jobs in DLQ:', stats.byReason.stalled);
+
+const stalledJobs = await queue.getDlqAsync({ reason: 'stalled' });
 ```
 
 </TabItem>
@@ -536,7 +543,7 @@ let jobs = queue.get_dlq(None)?;
 </TabItem>
 </Tabs>
 
-*The aggregate `getDlqStats()` and the `reason` filter are Bun-client only. The external SDKs list DLQ contents with `getDlq(count?)` / `get_dlq()` / `GetDlq(count)`, but they return the raw job objects and discard the DLQ entry metadata, so `reason` (`'stalled'`, `'max_attempts_exceeded'`, …) is not available there.*
+*Both TypeScript packages expose authoritative `getDlqStatsAsync()` and `getDlqAsync({ reason })` over TCP. The other SDKs list raw DLQ jobs with `getDlq(count?)` / `get_dlq()` / `GetDlq(count)` and do not expose the entry's failure-reason metadata through those helpers.*
 
 ## SandboxedWorker
 

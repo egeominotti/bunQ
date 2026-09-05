@@ -1,6 +1,6 @@
 /** E2E: worker — events, concurrency, pause/resume, unrecoverable, locks. */
 
-import { type Job, UnrecoverableError } from '../dist/index.js';
+import { type Job, UnrecoverableError } from '../dist/legacy.js';
 import { assert, assertEq, makeQueue, makeWorker, sleep, test, waitFor } from './harness.ts';
 
 test('worker: full event lifecycle (ready/active/completed/drained/closed)', async () => {

@@ -45,7 +45,7 @@ import { Worker } from 'bunqueue-client';
 const worker = new Worker('my-queue', async (job) => {
   // Process the job; the return value is stored as the job's result
   return { success: true };
-});
+}, { embedded: false });
 ```
 
 </TabItem>
@@ -123,12 +123,12 @@ Bunqueue.Worker.run(worker)
 The Bun, TypeScript, and Python workers start polling immediately (`autorun`); the PHP, Go, Rust, and Elixir workers start when you call their run function. If your processor throws, the job is retried automatically (until the job's `attempts` total executions are used up; the default 3 means 1 run + 2 retries) and then moved to the dead letter queue, a holding area for jobs that keep failing.
 
 :::caution[Embedded vs TCP]
-`embedded: true` runs in-process alongside an embedded Queue and is a Bun (`bunqueue/client`) feature. Without it, the Worker connects to a bunqueue server on `localhost:6789`. Worker and Queue must use the same mode. The external SDKs are TCP-only.
+`embedded: true` runs in-process alongside an embedded Queue and requires Bun. On Node.js and Deno, use `embedded: false` and a TCP connection (default `localhost:6789`). Worker and Queue must use the same mode. Both TypeScript packages share this API; the other SDKs are TCP-only.
 :::
 
 ## Bun processor contract
 
-The Bun package passes `{ signal }` as the optional second processor argument:
+Both TypeScript packages pass `{ signal }` as the optional second processor argument:
 
 ```typescript
 const worker = new Worker('downloads', async (job, context) => {
@@ -149,7 +149,7 @@ The aliases do not create a second implementation or enable telemetry.
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
 | [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |

@@ -367,6 +367,10 @@ closing the worker and queue.
   promise snapshot stability under concurrent insertion. `archive` moves at
   most 1000 rows per call.
 - **The retention cutoff is inclusive** (`updated_at <= Date.now() - maxAgeMs`). A strict `<` made `cleanup(0)`/`archive(0)` skip every row stamped in the current millisecond, which is where a run that has just reached a terminal state sits, so the documented "flush everything terminal now" call returned 0 (`test/repro-workflow-archive-boundary.test.ts`).
+  The regression freezes the clock around synchronous store operations, verifies
+  the exact-cutoff row is removed once, and checks that newer and nonterminal
+  rows survive. It does not depend on completing SQLite work within one
+  wall-clock millisecond.
 - **Listener safety:** emitter dispatch wraps each listener in try/catch so a throwing observer cannot break event delivery (`emitter.ts:112-130`).
 - **Duplicate step names** across the whole node graph are rejected at `register()` (`executor.ts:41-46`).
 

@@ -4,7 +4,7 @@
  * instance living for the duration of one request (Cron Trigger / DO alarm
  * pattern) works fully: routes, middleware, in-process retry, triggers. */
 
-import { Bunqueue } from 'bunqueue-client';
+import { Bunqueue } from 'bunqueue-client/legacy';
 import type { Env } from './routes-basic.ts';
 
 const uniq = () => `wk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

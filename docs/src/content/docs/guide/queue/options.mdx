@@ -160,8 +160,10 @@ higher-priority FIFO job.
 The top-level `priority` rule above applies to ungrouped jobs. For grouped jobs,
 put priority inside `group`: `group.priority` accepts integers from `0` through
 `2,097,151`, where `0` is highest and positive values run in ascending order.
-`group.maxSize` must be a positive safe integer and rejects the entire single,
-bulk, or flow admission before writes when the group's pending depth is full.
+`group.maxSize` must be a positive safe integer. A full group rejects a single
+add or an atomic flow admission. PostgreSQL bulk adds are transactional;
+embedded memory/SQLite bulk adds can retain the jobs accepted before the one
+that exceeds the cap, then throw. See [group admission semantics](/guide/queue/job-groups/#add-grouped-jobs).
 
 Processing `timeout` values are measured from the active transition and use an
 absolute next-deadline timer. Concurrent jobs retain their individual deadlines.
@@ -190,7 +192,7 @@ one new graph.
 
 ## Where to go next
 
-|                                                                           |                                               |
+| Guide | What it covers |
 | ------------------------------------------------------------------------- | --------------------------------------------- |
 | [Queue API](/guide/queue/)                                                | Create a queue in embedded or TCP mode        |
 | [Adding Jobs](/guide/queue/adding-jobs/)                                  | add, addBulk, priorities, delays, durability  |

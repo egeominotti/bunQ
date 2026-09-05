@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The default entry now uses the canonical Bun client implementation and
+  public types. Queue/Worker/Job behavior, defaults, events, groups, batches,
+  dependency helpers, and Async methods share one source across packages.
+  Historical flat-option SDK APIs remain available at `bunqueue-client/legacy`.
+- Builds reject stale source/artifact manifests and any public type/API drift.
+  Shared native contracts and generated histories exercise the compiled SDK;
+  Bun, Node 20/22, Deno, protocol conformance, and Workers are release gates.
+- Portable TCP/TLS and worker-thread adapters replace runtime I/O only. The
+  real embedded backend is loaded under Bun and remains Bun-only.
+
 ### Removed
 
 - Removed the StrykerJS mutation gate, its `stryker.config.mjs` configuration

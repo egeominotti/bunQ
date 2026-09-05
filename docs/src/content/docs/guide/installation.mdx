@@ -114,14 +114,21 @@ await queue.add('hello', { message: 'bunqueue is working!' });
 Start a server (`bunx bunqueue start`), save this as `test.ts`, then run
 `node --experimental-strip-types test.ts` (Node 22+) or `deno run -A test.ts`:
 
+
+
 ```typescript
 import { Queue, Worker } from 'bunqueue-client';
 
-const queue = new Queue('test'); // connects to localhost:6789
-const worker = new Worker('test', async (job) => {
-  console.log('Processing:', job.data);
-  return { success: true };
-});
+// Both Queue and Worker must have embedded: false
+const queue = new Queue('test', { embedded: false });
+const worker = new Worker(
+  'test',
+  async (job) => {
+    console.log('Processing:', job.data);
+    return { success: true };
+  },
+  { embedded: false }
+);
 
 await queue.add('hello', { message: 'bunqueue is working!' });
 ```

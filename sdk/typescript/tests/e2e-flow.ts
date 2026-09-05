@@ -1,6 +1,6 @@
 /** E2E: FlowProducer — atomic trees, chains, fan-in and flow reads. */
 
-import { FlowProducer, type Job } from '../dist/index.js';
+import { FlowProducer, type Job } from '../dist/legacy.js';
 import {
   assert,
   assertEq,

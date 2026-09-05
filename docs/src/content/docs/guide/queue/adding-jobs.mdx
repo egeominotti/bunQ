@@ -52,7 +52,7 @@ const configuredJob = await queue.add('job-name', data, {
   priority: 10, // Higher = processed first
   delay: 5000, // Wait 5s before processing
   attempts: 5, // Max total executions, first run included (default: 3)
-  backoff: 2000, // Exponential base delay in ms (default: 1000)
+  backoff: 2000, // Exponential base delay in ms (default: 1000, jitter applied, capped at 1h)
   // OR: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
   timeout: 30000, // Fail the job if processing takes longer
   jobId: 'custom-id', // Custom ID, makes the add idempotent (see Deduplication)
@@ -266,11 +266,13 @@ let ids = queue.add_bulk(vec![
 </TabItem>
 </Tabs>
 
-`addBulk` is ordered and uses accepted-prefix semantics; it is not an
-all-or-nothing flow transaction. If a later entry is rejected, earlier entries
-that were already accepted remain in the queue and later entries are not
-evaluated. The rejected entry itself is never left as a hidden in-memory job.
-Use `FlowProducer` when the whole graph must commit atomically.
+On memory/SQLite brokers, `addBulk` is ordered and uses accepted-prefix
+semantics, including over TCP. If a later entry is rejected (for example by a
+group `maxSize` limit), earlier accepted entries remain queued and later
+entries are not evaluated. The rejected entry is never left as a hidden
+in-memory job. PostgreSQL brokers commit `addBulk` in one transaction: an
+admission error rolls back the batch. Use `FlowProducer` when the complete
+graph must commit atomically across every backend.
 
 ### Repeat on a schedule
 
@@ -551,7 +553,7 @@ SQLite buffer.
 
 ## Where to go next
 
-|                                                                           |                                               |
+| Guide | What it covers |
 | ------------------------------------------------------------------------- | --------------------------------------------- |
 | [Queue API](/guide/queue/)                                                | Create a queue in embedded or TCP mode        |
 | [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/)      | Idempotent adds, dedup keys, custom job ids   |

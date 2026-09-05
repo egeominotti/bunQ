@@ -1,7 +1,7 @@
 /** E2E: observability — telemetry sink, lifecycle events, injectable logger. */
 
 import { createServer } from 'node:net';
-import { type Logger, Queue, type TelemetryEvent } from '../dist/index.js';
+import { type Logger, Queue, type TelemetryEvent } from '../dist/legacy.js';
 import { assert, getPort, qname, test } from './harness.ts';
 
 function closedPort(): Promise<number> {

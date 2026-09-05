@@ -47,15 +47,13 @@ queue.close();                     // Close TCP connection (no-op in embedded mo
 <TabItem label="Node.js / Deno">
 
 ```typescript
-await queue.pause();           // Workers stop pulling
-await queue.resume();          // Back to normal
-const n = await queue.drain(); // Remove all waiting/delayed jobs, get removed count
-await queue.obliterate();      // Remove ALL queue data
-
-await queue.remove('job-id');  // Remove one job
-
-await queue.waitUntilReady();  // Wait until the server is reachable
-queue.close();                 // Close the TCP connection
+await queue.pauseAsync();           // Stop new pulls and wait for the broker
+await queue.resumeAsync();          // Resume the queue
+const n = await queue.drainAsync(); // Remove waiting/delayed jobs, return count
+await queue.obliterateAsync();      // Remove all queue data
+await queue.removeAsync('job-id');  // Remove one job and wait for the broker
+await queue.waitUntilReady();
+await queue.disconnect();          // Flush pending adds and close the connection
 ```
 
 </TabItem>
@@ -163,8 +161,8 @@ const one = queue.retryCompleted('job-id-123');        // one job (sync, embedde
 <TabItem label="Node.js / Deno">
 
 ```typescript
-// Remove completed jobs older than 1 hour, max 100
-const removed = await queue.clean(3600000, 100, 'completed');
+// Remove completed jobs older than 1 hour, max 100 (async works in both modes)
+const removed = await queue.cleanAsync(3600000, 100, 'completed');
 
 // Promote delayed jobs to waiting now
 const promoted = await queue.promoteJobs({ count: 50 });
@@ -172,9 +170,16 @@ const promoted = await queue.promoteJobs({ count: 50 });
 // Re-queue failed jobs from the DLQ
 await queue.retryJobs({ state: 'failed', count: 100 });
 
-// Re-queue completed jobs (e.g. after a logic change)
-await queue.retryCompleted();             // all completed, use with care
-await queue.retryCompleted('job-id-123'); // one job
+// Re-queue completed jobs through the same selector contract
+await queue.retryJobs({
+  state: 'completed',
+  count: 100,
+  timestamp: Date.now() - 3600000, // completed at least one hour ago
+});
+
+// Direct completed-job helpers (e.g. after a logic change)
+const count = await queue.retryCompletedAsync();       // all completed, use with care
+const one = await queue.retryCompletedAsync('job-id-123');        // one job; returns the broker count
 ```
 
 </TabItem>
@@ -274,7 +279,7 @@ multi-broker mode. The cleared state therefore survives broker restart.
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
 | [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |

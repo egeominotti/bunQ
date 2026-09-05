@@ -1,6 +1,6 @@
 /** Workers e2e — advanced routes: batch consume, DLQ, flows, cron, auth. */
 
-import { CommandError, Connection, FlowProducer, Queue } from 'bunqueue-client';
+import { CommandError, Connection, FlowProducer, Queue } from 'bunqueue-client/legacy';
 import { type Env, makeQueue } from './routes-basic.ts';
 
 const uniq = () => `wk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

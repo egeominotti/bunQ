@@ -1,6 +1,6 @@
 /** E2E: auth — dedicated server with AUTH_TOKENS (own fixture, not shared). */
 
-import { AuthError, CommandError, Connection, Queue } from '../dist/index.js';
+import { AuthError, CommandError, Connection, Queue } from '../dist/legacy.js';
 import { assert, qname, startServer, test } from './harness.ts';
 
 test('auth: valid token, wrong token → AuthError, no token → rejected', async () => {

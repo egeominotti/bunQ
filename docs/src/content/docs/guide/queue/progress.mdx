@@ -53,13 +53,21 @@ const result = await queue.waitJobUntilFinished('job-id', queueEvents, 30000);
 // Progress and logs (also available on the job object inside a processor)
 await queue.updateJobProgress('job-id', 75);
 await queue.addJobLog('job-id', 'Processing step 3 completed');
-const logs = await queue.getJobLogs('job-id', 0, 100);
+const { logs, count } = await queue.getJobLogs('job-id', 0, 100);
 
 // Parent/child flows (see the Flow guide)
 const childValues = await queue.getChildrenValues('parent-job-id');
+const deps = await queue.getJobDependencies('job-id');
+const processed = await queue.getDependencies('parent-id', 'processed', 0, 10);
 
-// Wait for a job to finish (throws on timeout or failure)
-const result = await queue.waitForJob('job-id', 30000);
+// Wait for a job to finish (requires a QueueEvents instance)
+import { QueueEvents } from 'bunqueue-client';
+const queueEvents = new QueueEvents('my-queue', {
+  embedded: false,
+  connection: { host: '127.0.0.1', port: 6789 },
+});
+await queueEvents.waitUntilReady();
+const result = await queue.waitJobUntilFinished('job-id', queueEvents, 30000);
 ```
 
 </TabItem>
@@ -171,8 +179,9 @@ await queue.moveJobToWaitingChildren('job-id', token);
 ```typescript
 await queue.moveJobToCompleted('job-id', { success: true }, token);
 await queue.moveJobToFailed('job-id', new Error('reason'), token);
-await queue.moveJobToWait('job-id');
-await queue.moveJobToDelayed('job-id', 60000); // delay in ms
+await queue.moveJobToWait('job-id', token);
+await queue.moveJobToDelayed('job-id', Date.now() + 60000, token);
+await queue.moveJobToWaitingChildren('job-id', token);
 ```
 
 </TabItem>
@@ -181,8 +190,8 @@ await queue.moveJobToDelayed('job-id', 60000); // delay in ms
 ```python
 queue.move_job_to_completed("job-id", {"success": True}, token)
 queue.move_job_to_failed("job-id", RuntimeError("reason"), token)
-queue.move_job_to_wait("job-id")
-queue.move_job_to_delayed("job-id", 60000)  # delay in ms
+queue.move_job_to_wait("job-id", token)
+queue.move_job_to_delayed("job-id", 60000, token)  # delay in ms
 ```
 
 </TabItem>
@@ -212,6 +221,7 @@ queue.retry_job("job-id")?;
 <TabItem label="Elixir">
 
 ```elixir
+# This queue helper has no token parameter; use it only for an unlocked job.
 :ok = Bunqueue.Queue.move_to_delayed(queue, "job-id", 60_000)  # delay in ms
 :ok = Bunqueue.Queue.retry_job(queue, "job-id")                # failed -> waiting
 ```
@@ -219,15 +229,15 @@ queue.retry_job("job-id")?;
 </TabItem>
 </Tabs>
 
-*The full token-bound transition set is available in TypeScript and Python
-(except `moveJobToWaitingChildren`, which is Bun-only);
+*The full token-bound transition set is available in both TypeScript packages.
+Python supports the transitions except `moveJobToWaitingChildren`;
 PHP and Go expose `moveJobToFailed`, Elixir exposes `move_to_delayed` and
 `retry_job`, and Rust intentionally leaves completion/failure acknowledgements
 to `Worker` while exposing queue-level retry.*
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
 | [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |

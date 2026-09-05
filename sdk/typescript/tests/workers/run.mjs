@@ -6,8 +6,9 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
-import { connect } from 'node:net';
+import { once } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,28 +34,74 @@ function portOpen(port) {
 }
 
 async function startServer(extraEnv = {}) {
-  const port = 22_000 + Math.floor(Math.random() * 8_000);
+  const reservation = createServer();
+  reservation.listen(0, '127.0.0.1');
+  await once(reservation, 'listening');
+  const port = reservation.address().port;
+  await new Promise((resolveClose) => reservation.close(resolveClose));
+  const directory = mkdtempSync(join(tmpdir(), 'bunqueue-wk-'));
   const proc = spawn('bun', ['src/main.ts'], {
     cwd: REPO_ROOT,
     env: {
-      ...process.env,
+      PATH: process.env.PATH,
       TCP_PORT: String(port),
       HTTP_PORT: '0',
-      BUNQUEUE_DATA_PATH: join(mkdtempSync(join(tmpdir(), 'bunqueue-wk-')), 'bunq.db'),
+      BUNQUEUE_EMBEDDED: '0',
+      BUNQUEUE_DATA_PATH: join(directory, 'bunq.db'),
       ...extraEnv,
     },
     stdio: 'ignore',
   });
+  const exited = once(proc, 'exit');
+  const stop = async () => {
+    if (proc.exitCode === null && proc.signalCode === null) {
+      proc.kill('SIGTERM');
+      const timer = setTimeout(() => proc.kill('SIGKILL'), 5_000);
+      try {
+        await exited;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    rmSync(directory, { recursive: true, force: true });
+  };
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
-    if (await portOpen(port)) return { port, proc };
+    if (await portOpen(port)) return { port, stop };
+    if (proc.exitCode !== null) break;
     await sleep(100);
   }
-  proc.kill();
+  await stop();
   throw new Error('bunqueue server did not start');
 }
 
 const CHECKS = {
+  '/canonical-queue': (r) =>
+    r.namespaces.length === 1 &&
+    r.namespaces[0] === 'registered' &&
+    r.count === 1 &&
+    r.isolated === true &&
+    r.priority === 4 &&
+    r.attempts === 1 &&
+    r.deduplicated === true &&
+    r.groupConcurrency === 2 &&
+    r.rate.max === 3 &&
+    r.rate.duration === 2_000 &&
+    r.paused === true &&
+    r.concurrency === 3 &&
+    r.logs[0] === '[info] portable log' &&
+    r.logCount === 1 &&
+    r.schedulerShape === true &&
+    r.dlqShape === true &&
+    r.failed === 1 &&
+    r.metricCount === 1 &&
+    r.removed === true,
+  '/canonical-flow': (r) =>
+    r.children === 1 &&
+    r.state === 'waiting-children' &&
+    r.dependencies === 1 &&
+    r.portableIds === true &&
+    r.countAfter === 0,
   '/add-query': (r) =>
     r.name === 'checkout' &&
     r.priority === 9 &&
@@ -103,12 +150,14 @@ const CHECKS = {
     r.circuit === 'closed',
 };
 
-const main = await startServer();
-const authSrv = await startServer({ AUTH_TOKENS: AUTH_TOKEN });
+let main;
+let authSrv;
 let worker;
 let failed = 0;
 
 try {
+  main = await startServer();
+  authSrv = await startServer({ AUTH_TOKENS: AUTH_TOKEN });
   worker = await unstable_dev('worker-app.ts', {
     config: 'wrangler.toml',
     vars: {
@@ -135,8 +184,8 @@ try {
   }
 } finally {
   if (worker) await worker.stop();
-  main.proc.kill();
-  authSrv.proc.kill();
+  if (main) await main.stop();
+  if (authSrv) await authSrv.stop();
 }
 
 const total = Object.keys(CHECKS).length;

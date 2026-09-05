@@ -41,7 +41,7 @@ await queue.add('job-name', { key: 'value' });
 ```typescript
 import { Queue } from 'bunqueue-client';
 
-const queue = new Queue('my-queue'); // connects to localhost:6789
+const queue = new Queue('my-queue', { embedded: false });
 
 await queue.add('job-name', { key: 'value' });
 ```
@@ -143,21 +143,31 @@ const remoteQueue = new Queue('tasks', {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-import { Queue } from 'bunqueue-client';
-
 // Typed queue: job.data is type-checked
 interface TaskData {
   userId: number;
   action: string;
 }
-const typedQueue = new Queue<TaskData>('tasks');
+const typedQueue = new Queue<TaskData>('tasks', { embedded: false });
 
-// Remote server: connection options are top-level
+// Default options applied to every job
+const emailQueue = new Queue('emails', {
+  embedded: false,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: 1000,
+    removeOnComplete: true,
+  },
+});
+
+// TCP mode with a custom connection
 const remoteQueue = new Queue('tasks', {
-  host: '192.168.1.100',
-  port: 6789,
-  token: 'secret-token', // If AUTH_TOKENS is set on the server
-  poolSize: 4, // Producer-side connection pool
+  connection: {
+    host: '192.168.1.100',
+    port: 6789,
+    token: 'secret-token', // If AUTH_TOKENS is set on the server
+    poolSize: 4, // Connection pool size
+  },
 });
 ```
 
@@ -253,11 +263,11 @@ remote_queue =
 </TabItem>
 </Tabs>
 
-_`embedded: true` and `defaultJobOptions` exist in the Bun `bunqueue` package only; the `poolSize` connection pool is TypeScript-only. In the other SDKs, pass connection options to the constructor (see [SDKs](/guide/sdks/#connection-options)) and job options per `add` call._
+_The two TypeScript packages share the same Queue API, including `defaultJobOptions`, `prefixKey`, auto-batching, and nested `connection.poolSize`. Use `embedded: false` on Node.js and Deno; embedded storage requires Bun. In the other SDKs, pass connection options to the constructor (see [SDKs](/guide/sdks/#connection-options)) and job options per `add` call._
 
 ## Where to go next
 
-|                                                                           |                                               |
+| Guide | What it covers |
 | ------------------------------------------------------------------------- | --------------------------------------------- |
 | [Adding Jobs](/guide/queue/adding-jobs/)                                  | add, addBulk, priorities, delays, durability  |
 | [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/)      | Idempotent adds, dedup keys, custom job ids   |

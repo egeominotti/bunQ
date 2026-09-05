@@ -42,8 +42,8 @@ worker.run();     // Start processing (if created with autorun: false)
 worker.pause();   // Stop pulling new jobs
 worker.resume();  // Resume
 
-await worker.close();      // Stop pulling, flush batched ACKs, drain in-flight jobs
-await worker.close(true);  // Force: skip the in-flight drain
+await worker.close();      // Wait for active jobs, then stop
+await worker.close(true);  // Force close immediately
 ```
 
 </TabItem>
@@ -165,8 +165,11 @@ process.on('SIGINT', async () => {
 <TabItem label="Node.js / Deno">
 
 ```typescript
+import { closeSharedTcpClient } from 'bunqueue-client';
+
 process.on('SIGINT', async () => {
-  await worker.close(); // drains in-flight jobs and flushes batched ACKs
+  await worker.close();
+  closeSharedTcpClient();  // TCP mode: close the shared connection pool
   process.exit(0);
 });
 ```
@@ -236,7 +239,7 @@ there is no shared client machinery to tear down.*
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Worker](/guide/worker/) | Create a worker and process your first job |
 | [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |

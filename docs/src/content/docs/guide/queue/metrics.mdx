@@ -42,8 +42,10 @@ const removed = await queue.trimEvents(1000);  // Keep the newest 1,000 events
 const workers = await queue.getWorkers();       // Active workers on this queue
 const count = await queue.getWorkersCount();
 
-const stats = await queue.getStats();           // Server-wide stats
-const metrics = await queue.getMetrics();       // Server-wide metrics
+const completedMetrics = await queue.getMetrics('completed', 0, 100);
+const failedMetrics = await queue.getMetrics('failed', 0, 100);
+
+const removed = await queue.trimEvents(1000);  // Keep the newest 1,000 events
 ```
 
 </TabItem>
@@ -136,7 +138,7 @@ queue metrics by `obliterateAsync()`. It is ephemeral in memory-only mode.
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
 | [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |

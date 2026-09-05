@@ -1,6 +1,6 @@
 /** Opt-in sustained producer soak. Run after `bun run build`. */
 
-import { Queue } from '../dist/index.js';
+import { Queue } from '../dist/legacy.js';
 import { cleanTempDirs, startServer } from './harness.ts';
 
 const seconds = Math.max(1, Number(process.env.BUNQUEUE_SDK_SOAK_SECONDS ?? 300));

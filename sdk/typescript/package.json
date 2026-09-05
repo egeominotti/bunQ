@@ -11,12 +11,17 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./legacy": {
+      "types": "./dist/legacy.d.ts",
+      "import": "./dist/legacy.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
     "src",
     "README.md",
+    "LEGACY.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
@@ -24,9 +29,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "bun ../../scripts/build-portable-client.ts && bun ../../scripts/check-client-parity.ts",
     "prepublishOnly": "bun run build",
     "test": "bun tests/e2e.ts",
+    "test:parity": "bun ../../scripts/check-client-parity.ts && BUNQUEUE_EMBEDDED=1 bun test ../../test/typescript-client-parity.test.ts ../../test/client-parity-*.test.ts ../../test/tcp-parity-*.test.ts",
+    "test:canonical": "bun tests/canonical-queue.mjs && bun tests/canonical-worker.mjs",
+    "test:shared-contract": "BUNQUEUE_EMBEDDED=1 bun test --parallel=4 --preload ../../scripts/client-parity/preload.ts ../../test/docs-queue-guide ../../test/docs-worker-guide ../../test/docs-quickstart.test.ts",
     "test:property": "bun test tests/flow-plan.property.test.ts tests/flow-identity.property.test.ts tests/flow-plan.validation.test.ts tests/flow-plan.limits.test.ts tests/flow-plan.contract.test.ts tests/flow-commit.test.ts tests/worker-slot-signal.test.ts",
     "test:integration": "bun tests/integration.ts",
     "test:soak": "bun tests/soak.ts",
@@ -51,15 +59,16 @@
     "cloudflare-workers"
   ],
   "dependencies": {
-    "msgpackr": "^1.11.8"
+    "msgpackr": "^1.11.8",
+    "bun-types": "1.4.0",
+    "@types/node": "26.0.1"
   },
   "devDependencies": {
     "fast-check": "4.9.0",
     "oxfmt": "0.64.0",
     "oxlint": "1.79.0",
     "oxlint-tsgolint": "7.0.2001",
-    "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.7.0"
   },
   "author": "Egeo Minotti",
   "homepage": "https://bunqueue.dev/guide/sdks/",

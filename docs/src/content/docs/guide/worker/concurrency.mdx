@@ -37,7 +37,8 @@ const worker = new Worker('my-queue', processor, {
 
 ```typescript
 const worker = new Worker('my-queue', processor, {
-  concurrency: 5,  // Up to 5 jobs at once (default: 4)
+  embedded: false,
+  concurrency: 5,  // Up to 5 jobs at once (default: 1)
 });
 ```
 
@@ -100,12 +101,9 @@ worker.concurrency = 2;   // Scale back down (minimum: 1)
 </TabItem>
 <TabItem label="Node.js / Deno">
 
-The network SDK fixes concurrency at construction. Drain and replace the worker
-to change it safely:
-
 ```typescript
-await worker.close();
-worker = new Worker('my-queue', processor, { concurrency: 10 });
+worker.concurrency = 10;  // Scale up under load
+worker.concurrency = 2;   // Scale back down (minimum: 1)
 ```
 
 </TabItem>
@@ -169,7 +167,7 @@ worker = Bunqueue.Worker.new("my-queue", handler, concurrency: 10)
 </TabItem>
 </Tabs>
 
-*Runtime concurrency changes are a Bun client feature; the external SDKs fix `concurrency` at construction.*
+*Both TypeScript packages support runtime concurrency changes. The other SDKs fix `concurrency` at construction.*
 
 ## Batch pulling
 
@@ -191,8 +189,9 @@ const worker = new Worker('queue', processor, {
 
 ```typescript
 const worker = new Worker('queue', processor, {
-  batchSize: 100,       // Request up to 100; free concurrency slots cap the pull
-  pollTimeoutMs: 5000,  // Wait up to 5s for jobs (long polling)
+  embedded: false,
+  batchSize: 100,     // Request up to 100; free concurrency slots cap the pull
+  pollTimeout: 5000,  // Wait up to 5s for jobs (long polling)
 });
 ```
 
@@ -258,7 +257,7 @@ Bulk pushes wake idle long-polling workers immediately, they never wait out the 
 ## Native processor batches (Bun)
 
 `batchSize` above optimizes transport but still invokes the processor once per
-job. The Bun package's `batch` option changes the processor contract: one call
+job. The shared TypeScript `batch` option changes the processor contract: one call
 owns several independently leased jobs.
 
 ```typescript
@@ -306,12 +305,12 @@ code can stop the whole batch; every member then follows that shared outcome.
 The processor's return value completes every member not marked with
 `setAsFailed(error)`. Each member still has its own token, events, retry budget,
 and final transition; one selective failure does not fail the rest of the
-batch. Native processor batches currently belong to the Bun client, while all
-external SDKs retain transport batch pulling.
+batch. Both TypeScript packages support processor batches; the other SDKs
+retain transport batch pulling.
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Worker](/guide/worker/) | Create a worker and process your first job |
 | [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |

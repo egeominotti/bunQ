@@ -1,6 +1,6 @@
 /** E2E: basics + query surface — custom ids, states, counts, logs, progress. */
 
-import { CommandError, Connection } from '../dist/index.js';
+import { CommandError, Connection } from '../dist/legacy.js';
 import { assert, assertEq, getPort, makeQueue, makeWorker, test, waitFor } from './harness.ts';
 
 test('ping + hello', async () => {

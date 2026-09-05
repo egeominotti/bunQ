@@ -1,6 +1,6 @@
 /** E2E: Simple Mode (Bunqueue) — routes, middleware, retry, circuit breaker, batch. */
 
-import { Bunqueue } from '../dist/index.js';
+import { Bunqueue } from '../dist/legacy.js';
 import { assert, assertEq, getPort, qname, sleep, test, waitFor } from './harness.ts';
 
 function makeApp<T, R>(name: string, opts: Record<string, unknown>): Bunqueue<T, R> {

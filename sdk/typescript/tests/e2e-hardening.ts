@@ -1,6 +1,6 @@
 /** Hardening: races, generated invariants, malformed-input fuzz corpus. */
 
-import { Queue, SerializationError } from '../dist/index.js';
+import { Queue, SerializationError } from '../dist/legacy.js';
 import { assert, assertEq, getPort, namedQueue, qname, test, waitFor } from './harness.ts';
 
 function generator(seed: number): () => number {

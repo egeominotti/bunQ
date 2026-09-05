@@ -98,21 +98,19 @@ const worker = new Worker(
   { connection, concurrency: 5 }
 );
 
-// After: bunqueue server + bunqueue-client, no Redis
+// After: bunqueue, no Redis
 import { Queue, Worker } from 'bunqueue-client';
 
-const queue = new Queue('emails'); // connects to localhost:6789
+const queue = new Queue('emails', { embedded: false });
 const worker = new Worker(
   'emails',
   async (job) => {
     await sendEmail(job.data);
     return { sent: true };
   },
-  { concurrency: 5 }
+  { embedded: false, concurrency: 5 }
 );
 ```
-
-Staying on Node.js or Deno? Install `bunqueue-client` instead of `bunqueue`, start the server once with `bunx bunqueue start --data-path ./data/bunq.db`, and keep your runtime.
 
 </TabItem>
 <TabItem label="Python">
@@ -142,7 +140,7 @@ BullMQ is a Node.js library, so the before/after pairs on this page are JavaScri
 </TabItem>
 </Tabs>
 
-_Embedded mode (`embedded: true`) ships in the Bun `bunqueue` package only. On Node.js and Deno, `bunqueue-client` connects to a bunqueue server; the Queue and Worker API is otherwise the same._
+_Embedded mode (`embedded: true`) requires the Bun runtime. On Node.js and Deno, `bunqueue-client` connects to a bunqueue server with `embedded: false`; the Queue and Worker implementation and API are shared with `bunqueue/client`._
 
 `embedded: true` runs the queue inside your process, backed by a local SQLite file, so there is no queue server to operate. `dataPath` says where that file lives.
 

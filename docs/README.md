@@ -17,6 +17,9 @@ for AI agents.
 
 ## Start here
 
+For the shared Bun/Node/Deno client build and its blocking compatibility
+checks, see [Canonical client parity](./features/client-runtime-parity.md).
+
 | Document                                                                                                    | What it covers                                                                                                                                                                                                                                                                |
 | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Architecture](./architecture.md)                                                                           | System overview, technology stack & rationale, layered design, component diagram, deployment modes, request data flows (PUSH/PULL/ACK/FAIL), sharding, lock hierarchy, persistence model, performance characteristics, and the full module map.                               |

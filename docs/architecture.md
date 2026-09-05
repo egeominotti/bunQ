@@ -1,5 +1,10 @@
 # Architecture Overview
 
+The default `bunqueue-client` package is generated from the same `src/client`
+implementation as `bunqueue/client`. Only runtime I/O boundaries differ;
+build manifests, exact declaration checks, shared contracts, and differential
+histories block client drift. See [Canonical client parity](./features/client-runtime-parity.md).
+
 bunqueue is a high-performance job queue for the [Bun](https://bun.sh) runtime.
 Its default engine embeds **sharded in-memory priority queues** for hot-path job
 movement and an **SQLite write-behind store** (WAL + MessagePack) for durability.

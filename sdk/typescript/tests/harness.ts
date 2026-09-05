@@ -1,5 +1,5 @@
 /**
- * Shared test harness — runtime-neutral (Node ≥22, Bun, Deno ≥2).
+ * Legacy API test harness — runtime-neutral (Node ≥22, Bun, Deno ≥2).
  *
  * Provides a tiny test registry, assertions, wait helpers and real-server
  * management (spawns `bun src/main.ts` from the repo root on a random port).
@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { type Job, Queue, Worker } from '../dist/index.js';
+import { type Job, Queue, Worker } from '../dist/legacy.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 

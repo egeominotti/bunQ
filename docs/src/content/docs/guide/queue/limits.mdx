@@ -45,14 +45,15 @@ await queue.rateLimit(5000);
 <TabItem label="Node.js / Deno">
 
 ```typescript
-// Cap parallel processing across ALL workers on this queue
-await queue.setGlobalConcurrency(10);
-await queue.removeGlobalConcurrency();
-
-// Cap throughput: max jobs per window (default: 1 second)
-await queue.setGlobalRateLimit(100);          // max 100 jobs per second
-await queue.setGlobalRateLimit(100, 60_000);  // max 100 jobs per minute
-await queue.removeGlobalRateLimit();
+await queue.setGlobalConcurrencyAsync(10);
+await queue.removeGlobalConcurrencyAsync();
+await queue.setGlobalRateLimitAsync(100);         // 100 jobs per second
+await queue.setGlobalRateLimitAsync(100, 60_000); // 100 jobs per minute
+await queue.removeGlobalRateLimitAsync();
+await queue.rateLimit(5000); // Temporary throttle; cleared by the broker
+const limit = await queue.getGlobalRateLimit();
+const ttl = await queue.getRateLimitTtl();
+const maxed = await queue.isMaxed();
 ```
 
 </TabItem>
@@ -116,7 +117,7 @@ queue.clear_rate_limit()?;
 </TabItem>
 </Tabs>
 
-*Global concurrency helpers exist in TypeScript, Python, and Elixir; the temporary `rateLimit(ms)` throttle is available in the Bun `bunqueue` package only.*
+*Global concurrency helpers exist in TypeScript, Python, and Elixir. Both TypeScript packages support the temporary `rateLimit(ms)` throttle and broker-authoritative limit getters.*
 
 :::note[Read-back semantics]
 - `rateLimit(ms)` throws on non-positive or non-finite `ms`. The expiry lives on the server, so it also survives your process exiting.
@@ -129,7 +130,7 @@ See [Rate Limiting](/guide/rate-limiting/) for worker-side limiting too.
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
 | [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |

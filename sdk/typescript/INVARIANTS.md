@@ -1,8 +1,29 @@
 # TypeScript SDK invariants
 
-This file defines the contracts that must remain true for
-`bunqueue-client`. The SDK is a TCP client shared by Node.js, Bun, Deno, and
-Cloudflare Workers with `nodejs_compat`; it is not an alternate queue engine.
+This file defines the contracts that must remain true for `bunqueue-client`.
+The default entry shares the canonical `src/client` implementation. It is a
+TCP client in Node.js, Deno, and Cloudflare Workers with `nodejs_compat`; Bun
+can also load the actual canonical embedded engine. It is not an alternate
+queue engine. The historical SDK implementation is isolated at `/legacy`.
+
+## Canonical parity
+
+- Public defaults, methods, constructors, options, return types, overloads,
+  events, and nested public type references come from `src/client/index.ts`.
+  Do not implement a second default Queue/Worker/FlowProducer/Bunqueue class.
+- Runtime adapters may implement sockets, threads, files, clocks, environment,
+  and random identifiers. They must not contain scheduling or job-state logic.
+- `build` emits the canonical source graph, portable adapters, and declarations
+  together. Its manifest hashes all source inputs and generated artifacts.
+  Changed/missing sources, stale artifacts, or declaration differences fail
+  the parity gate; no snapshot acceptance or broad exclusion list is allowed.
+- The same native public behavior suites run against the compiled SDK. Random
+  command histories additionally compare authoritative state/results/counters.
+- Bun, Node 20/22, and Deno canonical scenarios are mandatory. Protocol
+  conformance uses the default entry; compatibility tests use `/legacy`
+  explicitly and never substitute for canonical parity coverage.
+- The contracts below describe the retained low-level transport and historical
+  compatibility API where it exposes additional SDK-specific helpers.
 
 ## Transport, framing, and authentication
 

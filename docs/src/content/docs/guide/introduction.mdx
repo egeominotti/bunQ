@@ -56,15 +56,24 @@ Run it with `bun run app.ts`. No server: the queue runs embedded in your process
 ```typescript
 import { Queue, Worker } from 'bunqueue-client';
 
-const queue = new Queue('emails');
+const storage = { embedded: false } as const;
+const queue = new Queue('emails', storage);
 
-const worker = new Worker('emails', async (job) => {
-  console.log('Sending to', job.data.to);
-  return { sent: true };
-});
+const worker = new Worker(
+  'emails',
+  async (job) => {
+    console.log('Sending to', job.data.to);
+    return { sent: true };
+  },
+  storage
+);
 
 await queue.add('welcome', { to: 'user@example.com' });
 ```
+
+
+
+
 
 Start the server once (`bunx bunqueue start`), then run the file with
 `node --experimental-strip-types app.ts` (Node 22+) or `deno run -A app.ts`.
@@ -170,7 +179,7 @@ That is a complete, working queue. The [Quick Start](/guide/quickstart/) walks t
 
 ## Two ways to run it
 
-|                    | Embedded                                 | Server                                          |
+| Comparison | Embedded                                 | Server                                          |
 | ------------------ | ---------------------------------------- | ----------------------------------------------- |
 | **What it is**     | A library inside your process            | A standalone `bunqueue` process                 |
 | **Best for**       | Single-process apps, scripts, serverless | Multiple services sharing one queue             |
@@ -227,9 +236,8 @@ const worker = new Worker('tasks', async (job) => {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-import { Queue, Worker } from 'bunqueue-client';
-
-const queue = new Queue('tasks'); // connects to localhost:6789
+// No embedded option = connects to localhost:6789
+const queue = new Queue('tasks');
 const worker = new Worker('tasks', async (job) => {
   /* ... */
 });

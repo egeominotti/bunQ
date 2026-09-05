@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [bun, node, deno]
+        runtime: [bun, node, node20, deno]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -61,11 +61,11 @@ jobs:
           bun-version: 1.4.2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.runtime == 'node20' && '20' || '22' }}
       - uses: denoland/setup-deno@v2
         if: matrix.runtime == 'deno'
         with:
-          deno-version: v2.x
+          deno-version: v2.9.6
       - name: Install server deps (for bun src/main.ts)
         run: bun install --frozen-lockfile
       - name: Install + build SDK
@@ -76,6 +76,25 @@ jobs:
       - name: Oxlint and Oxfmt check
         working-directory: sdk/typescript
         run: bun run check
+      - name: Canonical API and shared behavior parity
+        if: matrix.runtime == 'bun'
+        working-directory: sdk/typescript
+        run: |
+          bun run test:parity
+          bun run test:shared-contract
+          bun run test:canonical
+      - name: Canonical package in Node
+        if: matrix.runtime == 'node' || matrix.runtime == 'node20'
+        working-directory: sdk/typescript
+        run: |
+          node tests/canonical-queue.mjs
+          node tests/canonical-worker.mjs
+      - name: Canonical package in Deno
+        if: matrix.runtime == 'deno'
+        working-directory: sdk/typescript
+        run: |
+          deno run -A tests/canonical-queue.mjs
+          deno run -A tests/canonical-worker.mjs
       - name: Flow planner properties (fast-check)
         if: matrix.runtime == 'bun'
         working-directory: sdk/typescript

@@ -55,7 +55,7 @@ await queue.upsertJobScheduler('daily-report', {
 });
 
 const scheduler = await queue.getJobScheduler('daily-report');
-const schedulers = await queue.getJobSchedulers();
+const schedulers = await queue.getJobSchedulers(0, 99, true);
 const count = await queue.getJobSchedulersCount();
 await queue.removeJobScheduler('daily-report');
 ```
@@ -141,14 +141,14 @@ queue.remove_job_scheduler("daily-report")?;
 </TabItem>
 </Tabs>
 
-The Bun client orders schedulers by their next execution time. Pagination uses
+Both TypeScript packages order schedulers by their next execution time. Pagination uses
 zero-based inclusive `start` and `end` offsets, so `(0, 99)` returns at most 100
 entries; `end: -1` means the rest of the list. `asc` defaults to `false`.
 Schedulers with the same next execution time are ordered deterministically by
 ID in the same direction.
 
-Scheduler IDs are global to the broker. The Bun client applies `prefixKey` to
-the ID automatically; external SDKs do not, so prefix IDs explicitly when
+Scheduler IDs are global to the broker. Both TypeScript packages apply `prefixKey` to
+the ID automatically; the other SDKs do not, so prefix IDs explicitly when
 applications share a server. TypeScript and Python filter scheduler lists to
 the current queue. PHP, Go, and Elixir currently return the broker-wide list,
 so filter its `queue` field in application code. Rust exposes get/remove but no

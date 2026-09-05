@@ -59,17 +59,19 @@ the computation. The experimental built-in alternative is
 import { Worker } from 'bunqueue-client';
 
 const worker = new Worker('heavy', async (job) => {
-  // Use node:worker_threads in Node.js or a Web Worker in Deno.
-  return cpuPool.run(job.data);
+  // Back this helper with node:worker_threads or a supervised process pool.
+  return runCpuTaskOffThread(job.data);
 }, {
+  connection: { host: '127.0.0.1', port: 6789 },
   concurrency: 4,
-  heartbeatIntervalS: 10,
-  lockTtlMs: 120_000,
+  heartbeatInterval: 10_000,
+  lockDuration: 120_000,
 });
 ```
 
-Do not run the synchronous calculation on the JavaScript event loop that owns
-the queue connection.
+The regular `Worker` owns the TCP connection and lease; the CPU pool does only
+the computation. The experimental built-in alternative is
+[`SandboxedWorker`](/guide/worker/sandboxed/).
 
 </TabItem>
 <TabItem label="Python">
@@ -254,6 +256,6 @@ The TCP server does not close a healthy connection merely because it is idle.
 :::tip[Related]
 - [Worker Options](/guide/worker/options/) - Worker-side heartbeat and lock settings
 - [Stall Detection](/guide/stall-detection/) - Broker recovery policy
-- [SandboxedWorker](/guide/worker/sandboxed/) - Bun-only experimental thread pool
+- [SandboxedWorker](/guide/worker/sandboxed/) - experimental thread pool for Bun, Node.js, and Deno
 - [Monitoring](/guide/monitoring/) - Observe active, stalled, failed, and DLQ jobs
 :::

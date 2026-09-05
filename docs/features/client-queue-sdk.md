@@ -6,6 +6,30 @@
 
 `Queue<T>` is the producer-side, BullMQ-style SDK surface for adding and managing jobs. Its 27-line public façade inherits focused runtime capabilities for state, queries, control, configuration, scheduling, compatibility and connection lifecycle. Those layers transparently drive **embedded mode** or **TCP mode**, while public and internal contracts live separately under `queue/types/`.
 
+TCP DLQ inspection and the methods on returned DLQ jobs use only the selected
+broker. `createDlqJobMethods` resolves the embedded manager lazily inside
+embedded branches; constructing TCP job methods must never initialize a local
+database or consult an embedded data-path environment variable. The regression
+`test/tcp-parity-queue-runtime.test.ts` exercises a real broker from a separate
+client process and verifies both the returned DLQ state and absence of a local
+client database.
+
+`test/tcp-parity-queue-contract.test.ts` exercises the built `bunqueue-client`
+package against the native Queue on one fresh TCP broker. It compares namespace
+isolation, default job options, query ordering, group and global limits, log and
+scheduler return shapes, and authoritative DLQ and metric results. This test
+must run after building the SDK so the shipped exports and portable transport
+are part of the evidence.
+
+`QueueGroup.listQueuesAsync()` combines queues registered through the group
+with matching queues from an already initialized embedded manager. It only
+inspects the manager through `peekSharedManager`; listing remote queues must
+not create an embedded runtime. The canonical package scenarios under
+`sdk/typescript/tests/canonical-*.mjs` exercise the default public entry with
+Node.js, Bun, and Deno. The Workers runner separately checks canonical Queue
+and Flow routes while retaining historical SDK tests under the `/legacy`
+export.
+
 ## Responsibilities & Scope
 
 Owns:

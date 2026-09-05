@@ -4,7 +4,7 @@
 
 import { Queue } from './queue';
 import { Worker } from './worker';
-import { getSharedManager } from './manager';
+import { getSharedManager, peekSharedManager } from './manager';
 import type { QueueOptions, WorkerOptions, Processor } from './types';
 
 /**
@@ -99,7 +99,9 @@ export class QueueGroup {
   /** List queues created through this group, including remote queues. */
   async listQueuesAsync(): Promise<string[]> {
     const names = new Set(this.queues.keys());
-    for (const name of this.listQueues()) names.add(name);
+    for (const name of peekSharedManager()?.listQueues() ?? []) {
+      if (name.startsWith(this.prefix)) names.add(name.slice(this.prefix.length));
+    }
     return [...names].sort();
   }
 

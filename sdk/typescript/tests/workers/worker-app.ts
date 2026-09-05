@@ -13,10 +13,13 @@ import {
   unicodePayload,
 } from './routes-basic.ts';
 import { simpleMode } from './routes-simple.ts';
+import { canonicalFlow, canonicalQueue } from './routes-canonical.ts';
 
 type Route = (env: Env) => Promise<Record<string, unknown>>;
 
 const ROUTES: Record<string, Route> = {
+  '/canonical-queue': canonicalQueue,
+  '/canonical-flow': canonicalFlow,
   '/add-query': addAndQuery,
   '/bulk': bulkAndCount,
   '/controls': controls,

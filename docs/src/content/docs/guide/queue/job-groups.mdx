@@ -26,7 +26,9 @@ different queues.
 
 ## Add grouped jobs
 
-The Bun client supports the group API in embedded and TCP mode:
+Both TypeScript packages support the complete group API. Use
+`bunqueue/client` with Bun, or import the same classes from `bunqueue-client`
+on Node.js and Deno. The following examples use TCP; embedded mode requires Bun:
 
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
@@ -60,8 +62,8 @@ await queue.add('deliver', payload, {
 active job no longer consumes that pending-cap slot. The broker performs the
 count and insert as one admission decision. A full group rejects a single add
 or the complete atomic FlowProducer graph without leaving partial jobs, and
-PostgreSQL `addBulk` is one transaction. The embedded (memory/SQLite) `addBulk`
-instead follows the accepted-prefix contract: jobs before the one that hits the
+PostgreSQL `addBulk` is one transaction. A memory/SQLite broker's `addBulk`,
+whether called through TCP or embedded mode, follows the accepted-prefix contract: jobs before the one that hits the
 cap are admitted and persisted, then the rejection is thrown.
 
 ## FIFO does not mean concurrency one
@@ -184,7 +186,7 @@ jobs and all group configuration for that queue.
 
 ## Where to go next
 
-|                                                   |                                                          |
+| Guide | What it covers |
 | ------------------------------------------------- | -------------------------------------------------------- |
 | [Rate Limits & Concurrency](/guide/queue/limits/) | Queue-wide limits and how they compose with group limits |
 | [Worker Concurrency](/guide/worker/concurrency/)  | Total Worker parallelism and batch pulling               |

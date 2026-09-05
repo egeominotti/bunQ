@@ -1,6 +1,6 @@
 /** E2E: control surface — delay/promote, moves, updates, clean, retry, lifo. */
 
-import type { Job } from '../dist/index.js';
+import type { Job } from '../dist/legacy.js';
 import { assert, assertEq, makeQueue, makeWorker, sleep, test, waitFor } from './harness.ts';
 
 test('control: delayed + promote single', async () => {

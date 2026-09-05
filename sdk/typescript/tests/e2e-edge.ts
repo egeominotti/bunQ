@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { Queue } from '../dist/index.js';
+import { Queue } from '../dist/legacy.js';
 import {
   assert,
   assertEq,
@@ -153,7 +153,7 @@ test('edge: worker survives server crash + restart on the same port', async () =
   const name = qname('edge-restart');
   const queue = new Queue<{ n: number }>(name, { host: '127.0.0.1', port });
   const seen: number[] = [];
-  const { Worker } = await import('../dist/index.js');
+  const { Worker } = await import('../dist/legacy.js');
   const worker = new Worker<{ n: number }, string>(
     name,
     (job) => {

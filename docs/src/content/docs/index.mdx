@@ -76,8 +76,11 @@ npm install bunqueue-client
 ```javascript title="jobs.mjs"
 import { Queue, Worker } from 'bunqueue-client';
 
-const connection = { host: '127.0.0.1', port: 6789 };
-const queue = new Queue('emails', connection);
+const options = {
+  embedded: false,
+  connection: { host: '127.0.0.1', port: 6789 },
+};
+const queue = new Queue('emails', options);
 
 const worker = new Worker(
   'emails',
@@ -85,7 +88,7 @@ const worker = new Worker(
     console.log('Processing:', job.data.to);
     return { sent: true };
   },
-  connection
+  options
 );
 
 worker.on('error', (error) => console.error(error));
@@ -106,8 +109,11 @@ deno add npm:bunqueue-client
 ```typescript title="jobs.ts"
 import { Queue, Worker } from 'bunqueue-client';
 
-const connection = { host: '127.0.0.1', port: 6789 };
-const queue = new Queue<{ to: string }>('emails', connection);
+const options = {
+  embedded: false,
+  connection: { host: '127.0.0.1', port: 6789 },
+};
+const queue = new Queue<{ to: string }>('emails', options);
 
 const worker = new Worker<{ to: string }>(
   'emails',
@@ -115,7 +121,7 @@ const worker = new Worker<{ to: string }>(
     console.log('Processing:', job.data.to);
     return { sent: true };
   },
-  connection
+  options
 );
 
 worker.on('error', (error) => console.error(error));

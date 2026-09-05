@@ -1,7 +1,7 @@
 /** Workers e2e — full API sweep inside workerd: manual moves with tokens,
  * Job instance methods, children ops, retryJobs, webhook toggle, schedulers. */
 
-import { Job, type Queue } from 'bunqueue-client';
+import { Job, type Queue } from 'bunqueue-client/legacy';
 import { type Env, makeQueue } from './routes-basic.ts';
 
 const uniq = () => `wk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -71,7 +71,7 @@ export async function apiJobMethods(env: Env): Promise<Record<string, unknown>> 
 }
 
 export async function apiChildren(env: Env): Promise<Record<string, unknown>> {
-  const { FlowProducer } = await import('bunqueue-client');
+  const { FlowProducer } = await import('bunqueue-client/legacy');
   const queueName = uniq();
   const flow = new FlowProducer({ host: env.BQ_HOST, port: Number(env.BQ_PORT) });
   const queue = makeQueue(env, queueName);

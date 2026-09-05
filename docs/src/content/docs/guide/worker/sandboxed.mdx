@@ -1,6 +1,6 @@
 ---
 title: "SandboxedWorker: Isolated Job Processing"
-description: "The experimental bunqueue SandboxedWorker runs handlers in Bun Workers so CPU-heavy jobs cannot block the main loop. Known limits and why to prefer Worker."
+description: "The experimental bunqueue SandboxedWorker runs handlers in worker threads on Bun, Node.js, and Deno so CPU-heavy jobs cannot block the main loop."
 head:
   - tag: meta
     attrs:
@@ -17,18 +17,18 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · worker</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Handlers in <em>their own thread.</em></h1>
-  <p class="bq-hero-sub">CPU-bound work starves an event loop. SandboxedWorker moves the handler into a Bun Worker thread so the main thread can keep heartbeating, at the cost of using bunqueue's experimental worker-pool implementation.</p>
+  <p class="bq-hero-sub">CPU-bound work starves an event loop. SandboxedWorker moves the handler into a worker thread so the main thread can keep heartbeating, using the same experimental worker-pool implementation on Bun, Node.js, and Deno.</p>
 </div>
 
 ## SandboxedWorker
 
 :::danger[Experimental, not recommended for production]
-Most of `SandboxedWorker`'s historical test suites are currently disabled. Treat it as an opt-in Bun-only feature, pin
-and test the Bun version you deploy, and prefer a standard `Worker` plus a
+Treat `SandboxedWorker` as an opt-in experimental feature. Pin
+and test the runtime version you deploy, and prefer a standard `Worker` plus a
 supervised process pool for production workloads.
 :::
 
-`SandboxedWorker` runs a processor module in Bun Worker threads. The queue and
+`SandboxedWorker` runs a processor module in Bun Workers or portable worker threads on Node.js and Deno. The queue and
 heartbeat loop stay in the parent thread. A per-job timeout terminates a stuck
 thread, and a crashed thread is restarted only while `autoRestart` is enabled
 and its restart budget remains.
@@ -58,17 +58,21 @@ await worker.start();
 </TabItem>
 <TabItem label="Node.js / Deno">
 
-The network SDK does not export `SandboxedWorker`. Keep the standard Worker as
-the queue owner and delegate CPU work to `node:worker_threads`, a Node child
-process, or a Deno Web Worker:
-
 ```typescript
-const worker = new Worker('cpu-intensive', (job) => cpuPool.run(job.data), {
+import { SandboxedWorker } from 'bunqueue-client';
+
+const worker = new SandboxedWorker('cpu-intensive', {
+  processor: './processor.js', // Compiled ESM processor module
+  connection: { host: '127.0.0.1', port: 6789 },
   concurrency: 4,
-  heartbeatIntervalS: 10,
-  lockTtlMs: 60_000,
+  timeout: 60_000,
 });
+await worker.start();
 ```
+
+Node.js and Deno use the portable worker-thread adapter. The processor must
+be executable by the host runtime; compile TypeScript to JavaScript when needed.
+Cloudflare Workers cannot create this local thread pool.
 
 </TabItem>
 <TabItem label="Python">
@@ -137,9 +141,10 @@ worker = Bunqueue.Worker.new("cpu-intensive", handler,
 </TabItem>
 </Tabs>
 
-The remaining API on this page is Bun-only.
+The remaining API is shared by both TypeScript packages. A local thread pool
+requires Bun, Node.js, or Deno; it is unavailable inside Cloudflare Workers.
 
-## Bun processor module
+## Processor module
 
 **Processor file** (`processor.ts`):
 
@@ -164,7 +169,7 @@ export default async (job: {
 To connect to a remote server instead of running embedded, pass a `connection`
 option (`host`, `port`, `token`); otherwise the shared embedded manager is used.
 
-## Bun lifecycle and local stats
+## Lifecycle and local stats
 
 ```typescript
 await worker.start();
@@ -204,7 +209,7 @@ instead.
 
 ### Worker vs SandboxedWorker
 
-| | Worker | SandboxedWorker |
+| Comparison | Worker | SandboxedWorker |
 |---|--------|-----------------|
 | **Production ready** | ✅ Stable | ⚠️ Experimental bunqueue implementation |
 | **I/O-bound tasks** (HTTP, DB, APIs) | ✅ Best choice | Overkill |
@@ -227,7 +232,7 @@ offloading and lease-sizing patterns.
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Worker](/guide/worker/) | Create a worker and process your first job |
 | [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |

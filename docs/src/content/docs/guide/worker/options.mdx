@@ -40,11 +40,11 @@ const worker = new Worker('queue', processor, {
 
 ```typescript
 const worker = new Worker('queue', processor, {
+  embedded: false,
   concurrency: 5,
   batchSize: 100, // Pull up to 100 jobs per request
-  pollTimeoutMs: 5000, // Long-poll: wait up to 5s for jobs (default)
-  lockTtlMs: 30000, // Job lease TTL
-  ackBatch: { enabled: true, maxSize: 50, maxDelayMs: 5 }, // Opt-in ACK batching
+  pollTimeout: 5000, // Long-poll: wait up to 5s for jobs instead of busy polling
+  limiter: { max: 10, duration: 1000 }, // Max 10 jobs per second
 });
 ```
 
@@ -122,7 +122,7 @@ worker =
 </TabItem>
 </Tabs>
 
-The table below documents the Bun client's options; the external SDK worker options are tabulated in the [SDK guide](/guide/sdks/#worker-options).
+The table below documents the shared TypeScript Worker options for Bun, Node.js, and Deno. Options for the other SDKs are tabulated in the [SDK guide](/guide/sdks/#worker-options).
 
 | Option              | Type                                           | Default          | Description                                                                                                                                                                                                                         |
 | ------------------- | ---------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -147,6 +147,14 @@ The table below documents the Bun client's options; the external SDK worker opti
 | `prefixKey`         | `string`                                       | -                | Namespace prefix; must match the producing Queue's. See [Namespace Isolation](/guide/queue/advanced/#namespace-isolation-prefixkey)                                                                                                 |
 
 **Connection pool sizing (TCP):** when `poolSize` is not set, it defaults to `min(concurrency, 8)`. Override it by setting `poolSize` explicitly.
+
+| Embedded storage option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `dataPath` | `string` | Unset | SQLite path for the process-wide embedded manager. Use the same path as the producing Queue. A conflicting path throws; TCP storage is configured on the server. |
+
+If `dataPath` is omitted, the Worker uses the existing embedded manager or the
+configured data-path environment variables. With neither a path nor a configured
+manager, embedded storage is memory-only. See [Persistence](/guide/quickstart/#turn-on-persistence).
 
 ### Native batch option details
 
@@ -179,7 +187,7 @@ jobs can be marked stalled and redelivered.
 
 ## Where to go next
 
-|                                                                         |                                                 |
+| Guide | What it covers |
 | ----------------------------------------------------------------------- | ----------------------------------------------- |
 | [Worker](/guide/worker/)                                                | Create a worker and process your first job      |
 | [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/)      | Run jobs in parallel and pull them in batches   |

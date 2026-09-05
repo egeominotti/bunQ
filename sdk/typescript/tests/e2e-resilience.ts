@@ -1,6 +1,6 @@
 /** E2E: resilience + throughput — backpressure, ACKB batching, connection pool. */
 
-import { ConnectionPool, Queue, type TelemetryEvent, Worker } from '../dist/index.js';
+import { ConnectionPool, Queue, type TelemetryEvent, Worker } from '../dist/legacy.js';
 import {
   assert,
   assertEq,

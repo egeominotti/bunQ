@@ -39,7 +39,8 @@ const worker = new Worker('queue', processor, {
 
 ```typescript
 const worker = new Worker('queue', processor, {
-  heartbeatIntervalS: 5, // Ping every 5 seconds (0 = disabled)
+  embedded: false,
+  heartbeatInterval: 5000, // Ping every 5 seconds (ms)
 });
 ```
 
@@ -119,10 +120,10 @@ const worker = new Worker('queue', processor, {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-const worker = new Worker('queue', async (job) => {
-  await job.extendLock(60_000); // optional explicit lease extension
-  return processor(job);
-}, { lockTtlMs: 30_000 });      // lock ownership cannot be disabled
+const worker = new Worker('queue', processor, {
+  embedded: false,
+  useLocks: false, // Rely on stall detection only
+});
 ```
 
 </TabItem>
@@ -182,13 +183,13 @@ worker = Bunqueue.Worker.new("queue", handler, lock_ttl: 30_000)
 </TabItem>
 </Tabs>
 
-*The external SDKs always use lock-based ownership: every pulled job carries a lock token whose TTL is set by `lockTtlMs` / `lock_ttl_ms` / `LockTtlMs` / `lock_ttl`, renewed by heartbeats. A single long-running handler can extend its own lease with `job.extendLock(ms)` (TypeScript, PHP), `job.extend_lock(ms)` (Python, Rust), or `job.ExtendLock(ms)` (Go).*
+*The other language SDKs always use lock-based ownership: every pulled job carries a lock token whose TTL is set by `lockTtlMs` / `lock_ttl_ms` / `LockTtlMs` / `lock_ttl`, renewed by heartbeats. A single long-running handler can extend its own lease with `job.extendLock(ms)` (PHP), `job.extend_lock(ms)` (Python, Rust), or `job.ExtendLock(ms)` (Go). The canonical TypeScript Job uses `job.extendLock(token, duration)`.*
 
-In the Bun client, locks can also be extended explicitly: `worker.extendJobLocks(jobIds, tokens, duration)`.
+In both TypeScript packages, locks can also be extended explicitly: `worker.extendJobLocks(jobIds, tokens, duration)`.
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Worker](/guide/worker/) | Create a worker and process your first job |
 | [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |

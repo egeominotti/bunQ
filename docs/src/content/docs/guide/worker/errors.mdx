@@ -43,11 +43,10 @@ worker.on('failed', (job, error) => {
 ```typescript
 const worker = new Worker('queue', async (job) => {
   await riskyOperation();  // Just let errors throw, retries are automatic
-});
+}, { embedded: false });
 
 worker.on('failed', (job, error) => {
-  const finalAttempt = job.attempts + 1 >= job.maxAttempts;
-  if (finalAttempt) alertOps(job, error);
+  console.warn(`Attempt ${job.attemptsMade + 1} failed`, error);
 });
 ```
 
@@ -131,22 +130,22 @@ worker =
 
 The `failed` listener fires after each broker-confirmed failed attempt, not only
 after retry exhaustion. The job snapshot was pulled before that failure, so the
-attempt that just failed is `attemptsMade + 1` (Bun), `attempts + 1`
-(TypeScript/Python). PHP and Go do not expose `maxAttempts` on their Job view;
+attempt that just failed is `attemptsMade + 1` (both TypeScript packages),
+`attempts + 1` (Python). PHP and Go do not expose `maxAttempts` on their Job view;
 use the queue's DLQ operations for authoritative terminal-failure alerts. Rust
 and Elixir record per-job outcomes in normal processor control flow and expose
 transport/retry failures through telemetry; see the
 [SDK guide](/guide/sdks/#worker-events).
 
 A processing timeout can win while user code is still running. In that race,
-the broker has already recorded the failed attempt. The Bun Worker treats the
+the broker has already recorded the failed attempt. Both TypeScript Workers treat the
 late processor result or exception as an acknowledged no-op: it emits neither
 a second `completed`/`failed` event nor a Worker `error`, and a newer retry lease
 remains free to finish normally.
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Worker](/guide/worker/) | Create a worker and process your first job |
 | [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |

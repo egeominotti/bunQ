@@ -32,6 +32,12 @@ For the default deployment it means one less server. There is nothing to install
 
 The server is Bun-only (`bun:sqlite`, `Bun.serve`, `Bun.listen` do not exist in Node), but your producers and workers run anywhere: official SDKs exist for [TypeScript (Node.js, Deno, Bun, Cloudflare Workers), Python, PHP, Go, Rust and Elixir](/guide/sdks/), all speaking the same TCP protocol.
 
+`bunqueue-client` builds its default API from the same TypeScript sources as
+`bunqueue/client`, including Queue, Worker, QueueEvents, QueueGroup, FlowProducer,
+and Simple Mode. On Node.js and Deno, use `embedded: false`, nested `connection`
+options, and the `Async` queue methods for remote reads and mutations. The
+historical SDK API remains available explicitly from `bunqueue-client/legacy`.
+
 ### What are the requirements?
 
 Bun 1.4.0 or newer (enforced via the package `engines` field) on macOS, Linux, or Windows via WSL. An SSD helps write throughput. Install steps are on the [installation page](/guide/installation/).

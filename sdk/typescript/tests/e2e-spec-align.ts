@@ -7,7 +7,7 @@
  */
 
 import { PROTOCOL_VERSION } from '../dist/frame.js';
-import { Bunqueue, Worker } from '../dist/index.js';
+import { Bunqueue, Worker } from '../dist/legacy.js';
 import {
   assert,
   assertEq,

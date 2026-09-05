@@ -1,7 +1,7 @@
 /** E2E: full API coverage — every public SDK method not exercised elsewhere,
  * verified against a real server (no mocks). */
 
-import { Job, Queue } from '../dist/index.js';
+import { Job, Queue } from '../dist/legacy.js';
 import {
   assert,
   assertEq,
@@ -110,7 +110,7 @@ test('api: retryJobs(failed) + retryCompleted', async () => {
 });
 
 test('api: flow children failure surface + child dependency removal', async () => {
-  const { FlowProducer } = await import('../dist/index.js');
+  const { FlowProducer } = await import('../dist/legacy.js');
   const flow = new FlowProducer({ host: '127.0.0.1', port: getPort() });
   const queueName = qname('api-children');
   const queue = new Queue(queueName, { host: '127.0.0.1', port: getPort() });

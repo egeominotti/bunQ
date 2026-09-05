@@ -22,7 +22,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## Namespace Isolation (`prefixKey`)
 
-`prefixKey` lets multiple environments, tenants, or services share one server without their jobs, crons, stats, pause state, DLQ, or rate limits overlapping. The prefix is added to the queue name server-side; `Queue.name` keeps reporting the logical name.
+`prefixKey` namespaces queue membership, crons, stats, pause state, DLQ, and rate limits on a shared broker. The client prefixes the broker queue key; `Queue.name` keeps reporting the logical name. Custom `jobId` values remain broker-wide, so include your tenant/environment in each custom ID when it must be isolated too.
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -40,12 +40,12 @@ await prodQueue.getJobCountsAsync(); // never sees dev jobs
 <TabItem label="Node.js / Deno">
 
 ```typescript
-// Prefix the broker queue name directly.
-const devQueue = new Queue('dev:emails');
-const prodQueue = new Queue('prod:emails');
+// Same server, fully isolated namespaces
+const devQueue = new Queue('emails', { prefixKey: 'dev:' });
+const prodQueue = new Queue('emails', { prefixKey: 'prod:' });
 
 await devQueue.add('send', { to: 'tester@example.com' });
-await prodQueue.getJobCounts(); // never sees dev jobs
+await prodQueue.getJobCountsAsync(); // never sees dev jobs
 ```
 
 </TabItem>
@@ -111,7 +111,7 @@ prod_queue = Bunqueue.queue("prod:emails")
 </TabItem>
 </Tabs>
 
-_A `prefixKey` option exists in the Bun `bunqueue` package and the Python SDK; in the other SDKs, prefix the queue name directly (e.g. `new Queue('dev:emails')`), the isolation is identical._
+_A `prefixKey` option exists in both TypeScript packages and the Python SDK. In the other SDKs, prefix the queue name directly (e.g. `new Queue('dev:emails')`). Custom job IDs still need an explicit namespace._
 
 A Worker must use the same `prefixKey` to consume the prefixed queue:
 
@@ -126,7 +126,7 @@ const devWorker = new Worker('emails', processor, { prefixKey: 'dev:' });
 <TabItem label="Node.js / Deno">
 
 ```typescript
-const devWorker = new Worker('dev:emails', processor);
+const devWorker = new Worker('emails', processor, { prefixKey: 'dev:' });
 ```
 
 </TabItem>
@@ -173,7 +173,8 @@ Common patterns: `dev:` / `staging:` / `prod:` on one server, `tenant-${id}:` pe
 
 Notes:
 
-- Everything is isolated per prefix: jobs, worker locks, counts, pause/drain/obliterate, rate limits, and cron schedulers (two prefixes can reuse the same `schedulerId`).
+- Queue membership, worker locks, counts, pause/drain/obliterate, rate limits, and cron schedulers are scoped by the prefixed queue key (two prefixes can reuse the same `schedulerId`).
+- Custom `jobId` ownership is broker-wide: `dev:order-123` and `prod:order-123` are distinct; two queues using plain `order-123` refer to the same live identity. A prefix is naming isolation, not an authorization boundary.
 - Backward compatible: without `prefixKey`, behavior is unchanged. Works in embedded and TCP modes.
 - The only user-visible side effect: `Job.queueName` inside processors shows the prefixed key (e.g. `dev:emails`).
 
@@ -203,11 +204,13 @@ const queue = new Queue('tasks', {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-// The network SDK sends this batch in one round-trip.
-await queue.addBulk([
-  { name: 'task', data: { id: 1 } },
-  { name: 'task', data: { id: 2 } },
-]);
+const queue = new Queue('tasks', {
+  autoBatch: {
+    enabled: true, // default
+    maxSize: 50, // flush when the buffer reaches this size (default: 50)
+    maxDelayMs: 5, // max wait before flushing (default: 5)
+  },
+});
 ```
 
 </TabItem>
@@ -269,7 +272,7 @@ let ids = queue.add_bulk(vec![
 </TabItem>
 </Tabs>
 
-_Auto-batching is available in the Bun `bunqueue` package only; in the other SDKs, use `addBulk` to batch producer traffic into one round-trip._
+_Auto-batching is available in both TypeScript packages (`bunqueue/client` and `bunqueue-client`); in the other SDKs, use `addBulk` to batch producer traffic into one round-trip._
 
 :::caution[Durable jobs bypass the batcher]
 Jobs with `durable: true` are always sent individually rather than through the
@@ -302,16 +305,17 @@ await forwarder.close();
 </TabItem>
 <TabItem label="Node.js / Deno">
 
-The network SDK has no local embedded buffer. When offline buffering is not
-required, write directly to the central broker:
-
 ```typescript
-const central = new Queue('central-name', {
-  host: 'queue.example.com',
-  port: 6789,
-  token: process.env.BQ_TOKEN,
+const forwarder = queue.forward({
+  to: { host: 'queue.example.com', port: 6789, tls: true, token: process.env.BQ_TOKEN },
+  queue: 'central-name', // optional remote queue name (default: same)
+  concurrency: 4, // parallel forwards (default: 4)
+  durable: true, // push remotely with durable: true (default: false)
 });
-await central.add('event', data, { durable: true });
+
+forwarder.on('forwarded', ({ id, remoteId, name }) => {});
+forwarder.on('error', (err) => {});
+await forwarder.close();
 ```
 
 </TabItem>
@@ -400,7 +404,7 @@ SQLite's 10ms hard-crash window is unacceptable. Full guide:
 
 ## Where to go next
 
-|                                                                      |                                               |
+| Guide | What it covers |
 | -------------------------------------------------------------------- | --------------------------------------------- |
 | [Queue API](/guide/queue/)                                           | Create a queue in embedded or TCP mode        |
 | [Adding Jobs](/guide/queue/adding-jobs/)                             | add, addBulk, priorities, delays, durability  |

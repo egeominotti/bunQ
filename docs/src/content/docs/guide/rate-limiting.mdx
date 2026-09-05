@@ -51,9 +51,13 @@ await queue.removeGlobalRateLimitAsync();
 <TabItem label="Node.js / Deno">
 
 ```typescript
-await queue.setGlobalRateLimit(100);          // 100 jobs per second
-await queue.setGlobalRateLimit(100, 60_000);  // 100 jobs per minute
-await queue.removeGlobalRateLimit();
+await queue.setGlobalRateLimitAsync(100);          // 100 jobs per second
+await queue.setGlobalRateLimitAsync(100, 60_000);  // 100 jobs per minute
+await queue.removeGlobalRateLimitAsync();
+
+// Awaitable variants: resolve after the server applied the change
+await queue.setGlobalRateLimitAsync(100, 60_000);
+await queue.removeGlobalRateLimitAsync();
 ```
 
 </TabItem>
@@ -127,8 +131,8 @@ queue.removeGlobalConcurrency();
 <TabItem label="Node.js / Deno">
 
 ```typescript
-await queue.setGlobalConcurrency(5);
-await queue.removeGlobalConcurrency();
+await queue.setGlobalConcurrencyAsync(5);
+await queue.removeGlobalConcurrencyAsync();
 ```
 
 </TabItem>
@@ -269,11 +273,10 @@ const worker = new Worker('emails', processor, {
 </TabItem>
 <TabItem label="Node.js / Deno">
 
-The TypeScript network SDK has no per-worker limiter. Use a custom queue-wide
-broker window instead:
-
 ```typescript
-await queue.setGlobalRateLimit(100, 60_000); // 100 starts/min across all workers
+const worker = new Worker('emails', processor, {
+  limiter: { max: 100, duration: 60_000 }, // 100 jobs per minute, per worker
+});
 ```
 
 </TabItem>

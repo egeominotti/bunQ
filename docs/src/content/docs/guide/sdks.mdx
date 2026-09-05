@@ -209,7 +209,7 @@ cargo add bunqueue-client
 ```typescript
 import { Queue } from 'bunqueue-client';
 
-const queue = new Queue('emails');
+const queue = new Queue('emails', { embedded: false });
 
 await queue.add('welcome', { to: 'user@example.com' });
 ```
@@ -279,7 +279,7 @@ import { Worker } from 'bunqueue-client';
 const worker = new Worker('emails', async (job) => {
   await sendEmail(job.data.to);
   return { sent: true };
-});
+}, { embedded: false });
 
 worker.on('completed', (job) => console.log('done:', job.id));
 worker.on('error', (err) => console.error(err)); // always attach (see Worker semantics)
@@ -405,13 +405,16 @@ Understanding four facts about the transport explains most SDK behavior:
 
 ```typescript
 const queue = new Queue('emails', {
-  host: 'queue.example.com',
-  port: 6789,
-  token: process.env.BUNQUEUE_TOKEN,
-  tls: true, // or { caFile } or { rejectUnauthorized: false }
-  commandTimeoutMs: 10000, // default
-  maxInFlight: 10_000, // backpressure bound; 0 = unbounded (default)
-  poolSize: 4, // producer-side connection pool; default 1
+  embedded: false,
+  connection: {
+    host: 'queue.example.com',
+    port: 6789,
+    token: process.env.BUNQUEUE_TOKEN,
+    tls: true, // or { caFile } or { rejectUnauthorized: false }
+    commandTimeout: 30_000, // default
+    maxInFlight: 100, // maximum in-flight commands per connection (default)
+    poolSize: 4, // connection pool size (default)
+  },
 });
 ```
 
@@ -507,7 +510,7 @@ the runtime:
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Lazy reconnect            | All six: a lost connection reconnects on the next call; workers re-register after every connection generation                                                                |
 | Worker retry backoff      | All six retry a failed pull loop without spinning; TypeScript, Python, PHP, Go, and Rust use bounded backoff, while Elixir uses a short fixed delay                          |
-| Producer fast-fail window | TypeScript and Python throttle repeated failed connection attempts (500 ms → 5 s)                                                                                            |
+| Producer fast-fail window | Legacy TypeScript and Python throttle repeated failed connection attempts (500 ms → 5 s); canonical TypeScript uses the shared client's reconnect policy |
 | TCP keepalive             | TypeScript and Python enable an approximately 15 s idle probe where the OS exposes the controls                                                                              |
 | Timeout-driven teardown   | All six discard a stream whose framing state is ambiguous; TypeScript/Python tolerate a configurable consecutive-timeout threshold, PHP/Go/Rust/Elixir tear down immediately |
 | Backpressure              | TypeScript optionally parks callers at `maxInFlight`; the synchronous clients naturally serialize/bound calls                                                                |
@@ -662,30 +665,42 @@ Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://g
 ### Producer throughput
 
 For high-volume producers the TypeScript SDK can fan commands across a
-round-robin connection pool, one line, no API change (TypeScript only):
+connection pool using the canonical nested connection options:
 
 ```typescript
-const queue = new Queue('ingest', { poolSize: 4 });
+const queue = new Queue('ingest', {
+  embedded: false,
+  connection: { poolSize: 4 },
+});
 ```
 
-The pool is **producer-side only**: workers intentionally keep a single
-connection, because job leases (lock tokens) and worker registration are
-per-connection server state. In every SDK, `addBulk` is the first tool for
-throughput: one round-trip for the whole batch.
+Both canonical Queue and Worker use the shared transport implementation.
+Workers preserve per-job lease tokens and re-register after reconnect. In
+every SDK, `addBulk` is the first tool for producer throughput: one round-trip
+for the whole batch. The canonical TypeScript Queue also batches concurrent
+`add()` calls by default; configure it with `autoBatch`.
 
 ## Processing jobs
 
 ### Worker options
 
+The canonical TypeScript Worker uses the same options as `bunqueue/client`:
+`concurrency` defaults to 1, `pollTimeout` and `heartbeatInterval` use
+milliseconds, `lockDuration` controls the lease, and `limiter`, `group`, and
+processor `batch` are supported. See the [shared Worker reference](/guide/worker/options/).
+The table below describes the other SDKs and the historical TypeScript
+`bunqueue-client/legacy` API; its `pollTimeoutMs`, `lockTtlMs`,
+`heartbeatIntervalS`, and opt-in `ackBatch` names do not apply to the default export.
+
 | Option               | Default                                         | Notes                                                                                   |
 | -------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `concurrency`        | 4 in TypeScript/Python/Go/Rust; 1 in Elixir/PHP | Jobs processed in parallel except PHP, which is sequential by design                    |
+| `concurrency`        | 4 in legacy TypeScript/Python/Go/Rust; 1 in Elixir/PHP | Jobs processed in parallel except PHP, which is sequential by design                    |
 | `batchSize`          | usually 10; Elixir defaults to concurrency      | Jobs fetched per `PULLB`, capped by free slots and the server max (1000)                |
 | `pollTimeoutMs`      | usually 5000; Elixir 1000                       | Server-side long-poll; max 30 000                                                       |
 | `lockTtlMs`          | 30 000                                          | Job lease TTL                                                                           |
 | `heartbeatIntervalS` | 10; Go defaults to disabled                     | Worker + per-job lock heartbeats; 0 disables (Go: negative or `DisableHeartbeat: true`) |
-| `ackBatch`           | off                                             | Opt-in ACK batching (below; TypeScript and Python)                                      |
-| `autorun`            | true where exposed                              | TypeScript/Python can start at construction; PHP, Go, Rust, and Elixir start explicitly |
+| `ackBatch`           | off                                             | Opt-in ACK batching (below; legacy TypeScript and Python)                                      |
+| `autorun`            | true where exposed                              | Legacy TypeScript/Python can start at construction; PHP, Go, Rust, and Elixir start explicitly |
 
 Names follow each language: Python, Rust, and Elixir use snake_case; PHP uses
 camelCase array keys; Go uses a `WorkerOptions` struct
@@ -717,7 +732,7 @@ const worker = new Worker('emails', async (job) => {
     throw new UnrecoverableError('malformed payload'); // skip retries → DLQ
   }
   return await send(job.data);
-});
+}, { embedded: false });
 ```
 
 </TabItem>
@@ -856,13 +871,21 @@ a protocol error instead of being treated as completion.
 ### ACK batching (high volume)
 
 Opt-in: coalesce completed-job acknowledgements into `ACKB` round-trips.
-Available in TypeScript and Python; the PHP, Go, Rust and Elixir workers
-acknowledge each job individually.
+Available as an explicit option in legacy TypeScript and Python; the PHP, Go,
+Rust and Elixir workers acknowledge each job individually. The canonical
+TypeScript Worker manages acknowledgement batching internally and does not
+expose the legacy `ackBatch` option.
 
 <Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
+The opt-in `ackBatch` option belongs to the historical API. Import it explicitly:
+
+
+
 ```typescript
+import { Worker } from 'bunqueue-client/legacy';
+
 const worker = new Worker('ingest', process, {
   concurrency: 32,
   ackBatch: { enabled: true, maxSize: 50, maxDelayMs: 5 },
@@ -969,31 +992,38 @@ Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://g
 
 ## Query, control and operations
 
-Every SDK implements the producer/worker baseline, finite job queries, queue
-control, basic DLQ operations, schedulers, atomic flow trees/chains, auth, TLS,
-and telemetry. They do **not** yet expose the complete Bun core surface with
-identical semantics.
+`bunqueue-client` builds its default exports from the same source as
+`bunqueue/client`: the TypeScript APIs, options, job objects, and TCP behavior
+are identical. Build-time export/signature checks and real-broker tests across
+Bun, Node.js, Deno, and Cloudflare Workers prevent a separately maintained API
+from drifting. Embedded storage requires Bun, and a local `SandboxedWorker`
+thread pool requires a runtime with worker threads.
+
+The other SDKs implement their language-specific producer/worker baseline,
+queries, control, basic DLQ operations, schedulers, flows, auth, and TLS.
+Their coverage differs from the shared TypeScript surface:
 
 | Area                                    | TypeScript        | Python            | PHP                      | Go                | Rust              | Elixir         |
 | --------------------------------------- | ----------------- | ----------------- | ------------------------ | ----------------- | ----------------- | -------------- |
 | Basic Queue + Worker                    | Full              | Full              | Full (sequential worker) | Full              | Full              | Full           |
-| Full 32-operation Job API               | 13                | 13                | 4                        | 4                 | 3                 | 2              |
-| Dependency/waiting-children operations  | Partial           | Partial           | Partial                  | Partial           | Missing           | Missing        |
-| Limit mutation / readback               | Partial / missing | Partial / missing | Partial / missing        | Partial / missing | Partial / missing | Full / missing |
-| Rich DLQ + selector-aware bulk retry    | Partial           | Partial           | Missing                  | Missing           | Missing           | Missing        |
+| Full 32-operation Job API               | Full              | 13                | 4                        | 4                 | 3                 | 2              |
+| Dependency/waiting-children operations  | Full              | Partial           | Partial                  | Partial           | Missing           | Missing        |
+| Limit mutation / readback               | Full / full       | Partial / missing | Partial / missing        | Partial / missing | Partial / missing | Full / missing |
+| Rich DLQ + selector-aware bulk retry    | Full              | Partial           | Missing                  | Missing           | Missing           | Missing        |
 | Flow bulk + fan-in + readback           | Full              | Full              | Read only                | Read only         | Missing           | Missing        |
-| Queue-scoped workers/schedulers         | Workers global    | Workers global    | Both global              | Both global       | Missing/partial   | Missing/global |
-| QueueGroup, forwarding, workflow engine | Missing           | Missing           | Missing                  | Missing           | Missing           | Missing        |
+| Queue-scoped workers/schedulers         | Full              | Workers global    | Both global              | Both global       | Missing/partial   | Missing/global |
+| QueueGroup and forwarding               | Full              | Missing           | Missing                  | Missing           | Missing           | Missing        |
 | Simple Mode                             | Full              | Full              | Missing                  | Missing           | Missing           | Missing        |
 
-Important current differences: TypeScript and Python dedup-owner lookup uses
-the custom-ID index, their rate-limit duration argument is not sent, and their
-completed bulk retry ignores `count` and has no `timestamp` selector. All
-external SDKs require explicit finite pagination; the Bun client's exhaustive
-`end: -1` behavior is not mirrored. The internal
+Canonical TypeScript supports deduplication-key lookup/removal, rate-limit
+windows and introspection, `count`/`timestamp` bulk-retry selectors, and
+exhaustive `end: -1` pagination. Use the `Async` Queue variants for authoritative
+TCP reads and mutations. The internal
 [SDK parity audit](https://github.com/egeominotti/bunqueue/blob/main/docs/features/polyglot-sdks.md)
-tracks the exact gaps and distinguishes missing helpers from Bun-only embedded,
-queue-event, and sandbox-worker features.
+tracks remaining differences in the other language SDKs and distinguishes API
+coverage from runtime capabilities. The historical TypeScript API remains
+available through the explicit `bunqueue-client/legacy` export; its constructor
+and result shapes are separate from the canonical default API.
 
 TypeScript and PHP use camelCase, Python/Rust/Elixir use snake_case, and Go uses
 exported Go style (`GetJobCounts`, `RetryDlq`, ...). A representative shared
@@ -1004,12 +1034,12 @@ baseline:
 
 ```typescript
 const job = await queue.getJob(id); // null when missing
-const state = await queue.getJobState(id); // 'waiting' | 'active' | ...
-const result = await queue.waitForJob(id, 30_000);
-const counts = await queue.getJobCounts(); // { waiting, active, completed, ... }
-await queue.pause();
-const dropped = await queue.drain(); // number of removed jobs
-await queue.retryDlq(); // re-queue dead-lettered jobs
+const state = await queue.getJobState(id);
+const result = await job?.waitUntilFinished(null, 30_000);
+const counts = await queue.getJobCountsAsync();
+await queue.pauseAsync();
+const dropped = await queue.drainAsync();
+const retried = await queue.retryDlqAsync();
 ```
 
 </TabItem>
@@ -1099,27 +1129,28 @@ complete before their parent, results are readable from the parent:
 ```typescript
 import { FlowProducer } from 'bunqueue-client';
 
-const flow = new FlowProducer();
+const flow = new FlowProducer({ embedded: false });
 
 // Sequential pipeline
 await flow.addChain([
-  { name: 'extract', queueName: 'etl' },
-  { name: 'transform', queueName: 'etl' },
-  { name: 'load', queueName: 'etl' },
+  { name: 'extract', queueName: 'etl', data: {} },
+  { name: 'transform', queueName: 'etl', data: {} },
+  { name: 'load', queueName: 'etl', data: {} },
 ]);
 
 // Tree: parent waits for its children
 const node = await flow.add({
   name: 'assemble',
   queueName: 'orders',
+  data: {},
   children: [
-    { name: 'reserve-stock', queueName: 'orders' },
-    { name: 'charge-card', queueName: 'orders' },
+    { name: 'reserve-stock', queueName: 'orders', data: {} },
+    { name: 'charge-card', queueName: 'orders', data: {} },
   ],
 });
 
 // Fan-in: N parallel jobs converge into one
-await flow.addBulkThen(parts, { name: 'merge', queueName: 'orders' });
+await flow.addBulkThen(parts, { name: 'merge', queueName: 'orders', data: {} });
 ```
 
 </TabItem>
@@ -1247,10 +1278,10 @@ and visibility guarantee. Previously published versions that compose
 `PUSH`/`UpdateParent` remain server-compatible, but that historical
 multi-request sequence is not atomic.
 
-Where exposed (TypeScript, Python, PHP, and Go), external-SDK `getFlow(id)`
+Where exposed (Python, PHP, and Go), external-SDK `getFlow(id)`
 returns `null` for a missing root and skips children removed since creation,
 yielding the surviving partial tree. Rust and Elixir currently create atomic
-trees/chains but expose no typed flow reader. The Bun package
+trees/chains but expose no typed flow reader. Both TypeScript packages
 fails on a missing descendant or malformed/cross-linked topology so corruption
 cannot masquerade as a valid partial graph. See the [Flow guide](/guide/flow/)
 for the exact per-client contract.
@@ -1265,8 +1296,14 @@ isolated so an observer can never break transport or worker correctness.
 <Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
+These telemetry hooks belong to the historical SDK API, available from the
+explicit `/legacy` export. The canonical client exposes the Bun client's
+Worker and QueueEvents events, connection health, and broker metrics.
+
+
+
 ```typescript
-import { Queue, consoleLogger, type TelemetryEvent } from 'bunqueue-client';
+import { Queue, consoleLogger, type TelemetryEvent } from 'bunqueue-client/legacy';
 
 const queue = new Queue('emails', {
   logger: consoleLogger('info'), // or any { debug, info, warn, error }
@@ -1361,6 +1398,7 @@ directly.
 import { Bunqueue } from 'bunqueue-client';
 
 const app = new Bunqueue('notifications', {
+  embedded: false,
   routes: {
     'send-email': async (job) => ({ sent: true }),
     'send-sms': async (job) => ({ sent: true }),
@@ -1437,9 +1475,10 @@ TypeScript, Python, PHP, and Go expose the broadest scheduler template and
 repeat flags. Rust omits list plus some flags, while Elixir's scheduler list is
 server-wide and its deduplication shorthand has the `uniqueKey` caveat above.
 
-One difference from the Bun original: `embedded: true` is not available,
-it requires the in-process Bun runtime. Connect to a server instead; the
-option raises a clear error if you try.
+`embedded: true` requires the Bun runtime, including when importing
+`bunqueue-client`. On Node.js and Deno, set `embedded: false` and connect to
+the broker. The client reports a clear error if embedded mode is requested
+without Bun.
 
 ## Cloudflare Workers
 
@@ -1458,14 +1497,20 @@ import { Queue } from 'bunqueue-client';
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const queue = new Queue('signups', {
-      host: env.BQ_HOST,
-      port: 6789,
-      token: env.BQ_TOKEN,
-      tls: true,
+      embedded: false,
+      connection: {
+        host: env.BQ_HOST,
+        port: 6789,
+        token: env.BQ_TOKEN,
+        tls: true,
+      },
     });
-    const job = await queue.add('welcome', await req.json());
-    queue.close();
-    return Response.json({ queued: job.id });
+    try {
+      const job = await queue.add('welcome', await req.json());
+      return Response.json({ queued: job.id });
+    } finally {
+      await queue.disconnect();
+    }
   },
 };
 ```
@@ -1486,10 +1531,13 @@ Authentication uses server-side tokens; transport security uses native TLS.
 
 ```typescript
 const queue = new Queue('emails', {
-  host: 'queue.example.com',
-  port: 6789,
-  token: process.env.BUNQUEUE_TOKEN, // server started with AUTH_TOKENS=...
-  tls: true, // or { caFile: './ca.pem' } for a custom CA
+  embedded: false,
+  connection: {
+    host: 'queue.example.com',
+    port: 6789,
+    token: process.env.BUNQUEUE_TOKEN, // server started with AUTH_TOKENS=...
+    tls: true, // or { caFile: './ca.pem' } for a custom CA
+  },
 });
 ```
 

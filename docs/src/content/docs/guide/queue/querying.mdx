@@ -49,18 +49,21 @@ const everyFailedJob = await queue.getFailedAsync(0, -1);
 
 ```typescript
 // One job
-const job = await queue.getJob('job-id');          // null when missing
+const job = await queue.getJob('job-id');
 const state = await queue.getJobState('job-id');
 // 'waiting' | 'prioritized' | 'delayed' | 'active' | 'completed'
-// | 'failed' | 'waiting-children'
+// | 'failed' | 'waiting-children' | 'unknown'
 
 // Counts per state
-const counts = await queue.getJobCounts();
+const counts = await queue.getJobCountsAsync();
 // { waiting, prioritized, active, completed, failed, delayed,
 //   'waiting-children', paused }
 
 // Lists, filtered by state
-const failed = await queue.getJobs({ state: 'failed', start: 0, end: 50 });
+const failed = await queue.getJobsAsync({ state: 'failed', start: 0, end: 50 });
+
+// Exhaustive traversal; TCP mode transparently drains consecutive pages
+const everyFailedJob = await queue.getFailedAsync(0, -1);
 ```
 
 </TabItem>
@@ -182,17 +185,21 @@ const waitingChildren = await queue.getJobsAsync({
 <TabItem label="Node.js / Deno">
 
 ```typescript
-// Per-state lists: getWaiting, getActive, getCompleted, getFailed, getDelayed
-const waiting = await queue.getWaiting(0, 10);
-const failed = await queue.getFailed(0, 10);
+// Awaitable state shortcuts work over TCP
+const waiting = await queue.getWaitingAsync(0, 10);
 
-// Counts
+// All state lists have an Async variant
+const failed = await queue.getFailedAsync(0, 10);
+
+// Counts (async, both modes)
 const failedCount = await queue.getFailedCount();
 // also: getWaitingCount, getActiveCount, getCompletedCount, getDelayedCount
 
 // BullMQ-compatible extras
 const prioritized = await queue.getPrioritized(0, 10);        // jobs with priority > 0
-const waitingChildren = await queue.getWaitingChildren(0, 10);
+const waitingChildren = await queue.getJobsAsync({
+  state: 'waiting-children', start: 0, end: 10,
+});
 ```
 
 </TabItem>
@@ -283,7 +290,7 @@ failed_count = Map.get(counts, "failed", 0)
 Both use the asynchronous job-query path; waiting children are selected through
 the dedicated state rather than inferred from job data.
 
-On the Bun client, `end: -1` is an explicit exhaustive read for `getJobs`,
+In both TypeScript packages, `end: -1` is an explicit exhaustive read for `getJobs`,
 `getJobsAsync`, every sync/async state shortcut, `getPrioritized`, and
 `getWaitingChildren`. TCP mode requests 1,000-row pages until exhaustion and
 removes duplicate IDs defensively; a finite `end` still denotes the exclusive
@@ -304,7 +311,7 @@ Jobs that exhaust their retries move to the dead letter queue (DLQ, a holding ar
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
 | [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |

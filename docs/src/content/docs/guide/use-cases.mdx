@@ -59,15 +59,15 @@ await queue.add('welcome', { to: 'user@example.com' });
 ```typescript
 import { Queue, Worker } from 'bunqueue-client';
 
-// Connects to a bunqueue server on localhost:6789
-const queue = new Queue('emails');
+// TCP mode: the broker owns persistence; configure its database on the server.
+const queue = new Queue('emails', { embedded: false });
 
 new Worker('emails', async (job) => {
   await sendEmail(job.data);
   return { sent: true };
-}, { concurrency: 10 }); // up to 10 jobs in parallel
+}, { embedded: false, concurrency: 10 }); // up to 10 jobs in parallel
 
-// In your API handler: this returns as soon as the job is queued
+// In your API handler: this resolves after the broker accepts the job
 await queue.add('welcome', { to: 'user@example.com' });
 ```
 
@@ -224,27 +224,26 @@ import { Queue, Worker } from 'bunqueue-client';
 
 interface EmailJob { to: string; template: string; data: Record<string, unknown> }
 
-const emails = new Queue<EmailJob>('emails');
-
-// Retry options are passed per add (defaultJobOptions is a Bun bunqueue feature)
-const retryOpts = {
-  attempts: 5,            // try up to 5 times
-  backoff: 2000,          // wait 2s, then 4s, 8s... between tries (exponential backoff)
-  removeOnComplete: true, // drop finished jobs to keep the queue lean
-};
+const emails = new Queue<EmailJob>('emails', {
+  embedded: false,
+  defaultJobOptions: {
+    attempts: 5,           // try up to 5 times
+    backoff: 2000,         // wait 2s, then 4s, 8s... between tries (exponential backoff)
+    removeOnComplete: true, // drop finished jobs to keep the queue lean
+  },
+});
 
 new Worker<EmailJob>('emails', async (job) => {
   const result = await sendEmail(job.data);
   return { messageId: result.messageId };
-}, { concurrency: 10 });
+}, { embedded: false, concurrency: 10 });
 
 // One email
-await emails.add('welcome',
-  { to: 'user@example.com', template: 'welcome', data: { name: 'John' } }, retryOpts);
+await emails.add('welcome', { to: 'user@example.com', template: 'welcome', data: { name: 'John' } });
 
 // Bulk newsletter, batched in one call
 await emails.addBulk(
-  subscribers.map((s) => ({ name: 'newsletter', data: { to: s.email, template: 'news', data: {} }, opts: retryOpts }))
+  subscribers.map((s) => ({ name: 'newsletter', data: { to: s.email, template: 'news', data: {} } }))
 );
 ```
 
@@ -389,13 +388,14 @@ await webhooks.add('order.created', {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-import { Queue, Worker } from 'bunqueue-client';
-
-const webhooks = new Queue('webhooks');
+const webhooks = new Queue('webhooks', {
+  embedded: false,
+  defaultJobOptions: { attempts: 8, backoff: 5000 }, // 5s, 10s, 20s, 40s...
+});
 
 // Jobs that exhaust all 8 attempts go to the DLQ.
 // Auto-retry the DLQ every hour, up to 3 times, then keep entries 7 days.
-await webhooks.setDlqConfig({
+await webhooks.setDlqConfigAsync({
   autoRetry: true,
   autoRetryInterval: 3_600_000,
   maxAutoRetries: 3,
@@ -412,13 +412,13 @@ new Worker('webhooks', async (job) => {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`); // throwing triggers a retry
   return { status: res.status };
-}, { concurrency: 20 });
+}, { embedded: false, concurrency: 20 });
 
 await webhooks.add('order.created', {
   endpoint: 'https://partner.com/webhooks',
   event: 'order.created',
   payload: { orderId: 'ORD-123' },
-}, { attempts: 8, backoff: 5000 }); // 5s, 10s, 20s, 40s...
+});
 ```
 
 </TabItem>
@@ -560,9 +560,10 @@ await images.add('product-image', {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-import { Queue, Worker } from 'bunqueue-client';
-
-const images = new Queue('images');
+const images = new Queue('images', {
+  embedded: false,
+  defaultJobOptions: { attempts: 3, timeout: 120_000 }, // kill stuck jobs after 2 minutes
+});
 
 new Worker('images', async (job) => {
   const { sourceUrl, variants } = job.data;
@@ -571,7 +572,7 @@ new Worker('images', async (job) => {
 
   for (let i = 0; i < variants.length; i++) {
     const v = variants[i];
-    // updateProgress(percent, message): your frontend can poll this
+    // updateProgress(percent, message): your frontend can poll or subscribe to this
     await job.updateProgress(Math.round((i / variants.length) * 100), `Processing ${v.name}`);
     const out = await sharp(source).resize(v.width, v.height).webp().toBuffer();
     urls[v.name] = await uploadToCDN(out, `${job.id}/${v.name}.webp`);
@@ -579,7 +580,7 @@ new Worker('images', async (job) => {
 
   await job.updateProgress(100, 'Done');
   return { urls };
-}, { concurrency: 5 });
+}, { embedded: false, concurrency: 5 });
 
 await images.add('product-image', {
   sourceUrl: 'https://uploads.example.com/raw/product-123.jpg',
@@ -587,7 +588,7 @@ await images.add('product-image', {
     { name: 'thumb', width: 150, height: 150 },
     { name: 'full', width: 1200, height: 900 },
   ],
-}, { attempts: 3, timeout: 120_000 }); // kill stuck jobs after 2 minutes
+});
 ```
 
 </TabItem>
@@ -734,12 +735,13 @@ await payments.add(
 <TabItem label="Node.js / Deno">
 
 ```typescript
-import { Queue, Worker } from 'bunqueue-client';
-
-const payments = new Queue('payments');
+const payments = new Queue('payments', {
+  embedded: false,
+  defaultJobOptions: { attempts: 3, backoff: 5000, timeout: 60_000 },
+});
 
 // Failed payments need a human, never an automatic re-charge
-await payments.setDlqConfig({ autoRetry: false, maxAge: 2_592_000_000 }); // keep 30 days
+await payments.setDlqConfigAsync({ autoRetry: false, maxAge: 2_592_000_000 }); // keep 30 days
 
 new Worker('payments', async (job) => {
   const { orderId, amount, idempotencyKey } = job.data;
@@ -750,15 +752,13 @@ new Worker('payments', async (job) => {
   if (intent.status !== 'succeeded') throw new Error(`Payment failed: ${intent.status}`);
   await recordTransaction(orderId, intent.id);
   return { paymentIntentId: intent.id };
-}, { concurrency: 5 });
+}, { embedded: false, concurrency: 5 });
 
 await payments.add(
   'charge',
   { orderId: 'ORD-123', amount: 9999, idempotencyKey: 'order-ORD-123' },
-  {
-    jobId: 'charge-ORD-123', durable: true, // SQLite closes its buffer window; PG is transactional
-    attempts: 3, backoff: 5000, timeout: 60_000,
-  }
+  // Custom ID deduplicates while retained; durable closes SQLite's admission buffer window.
+  { jobId: 'charge-ORD-123', durable: true }
 );
 ```
 
@@ -883,9 +883,7 @@ new Worker('scheduled', async (job) => {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-import { Queue, Worker } from 'bunqueue-client';
-
-const scheduled = new Queue('scheduled');
+const scheduled = new Queue('scheduled', { embedded: false });
 
 // Daily cleanup at 3 AM
 await scheduled.upsertJobScheduler(
@@ -904,7 +902,7 @@ await scheduled.upsertJobScheduler(
 new Worker('scheduled', async (job) => {
   if (job.data.task === 'cleanup') return { deleted: await cleanupOldRecords() };
   return await checkSystemHealth();
-});
+}, { embedded: false });
 ```
 
 </TabItem>
@@ -1099,9 +1097,21 @@ await flow.close();
 ```typescript
 import { FlowProducer, Worker } from 'bunqueue-client';
 
-const flow = new FlowProducer();
+type OrderData = { orderId: string };
+const flow = new FlowProducer({ embedded: false });
 
-await flow.add({
+const checks = new Worker<OrderData>('checks', async (job) => ({
+  check: job.name,
+  approved: true,
+}), { embedded: false });
+
+const orders = new Worker<OrderData>('orders', async (job) => {
+  // Children finished first; read what each one returned
+  const results = await job.getChildrenValues();
+  return { orderId: job.data.orderId, shipped: true, checks: results };
+}, { embedded: false });
+
+const node = await flow.add<OrderData>({
   name: 'fulfill-order',
   queueName: 'orders',
   data: { orderId: 'ORD-123' },
@@ -1111,11 +1121,12 @@ await flow.add({
   ],
 });
 
-new Worker('orders', async (job) => {
-  // Children finished first; read what each one returned
-  const results = await job.getChildrenValues();
-  return shipOrder(job.data.orderId, results);
-});
+const result = await node.job.waitUntilFinished(null, 10_000);
+console.log(result);
+
+await checks.close();
+await orders.close();
+await flow.close();
 ```
 
 </TabItem>

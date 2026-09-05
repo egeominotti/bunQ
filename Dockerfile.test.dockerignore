@@ -35,6 +35,10 @@
 !docs/src/content/docs/**
 !docs/src/lib/
 !docs/src/lib/reference-seo.ts
+!docs/src/lib/llms-full.ts
+!docs/src/components/
+!docs/src/components/examples/
+!docs/src/components/examples/**
 !docs/vercel.json
 !.github/
 !.github/workflows/
@@ -55,6 +59,8 @@
 !sdk/typescript/tests/workers/
 !sdk/typescript/tests/workers/run.mjs
 !sdk/typescript/package.json
+!sdk/typescript/tsconfig.json
+!sdk/typescript/bun.lock
 !sdk/typescript/src/
 !sdk/typescript/src/**
 !sdk/python/

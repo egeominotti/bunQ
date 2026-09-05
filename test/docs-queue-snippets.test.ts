@@ -115,7 +115,17 @@ describe('Queue guide snippets', () => {
     }
     const management = groups(source)[3];
     expect(management).toBeDefined();
-    const networkExamples = snippets(management).filter((entry) => entry.label !== 'Bun');
+    const canonicalExamples = snippets(management).filter((entry) =>
+      ['Bun', 'Node.js / Deno'].includes(entry.label)
+    );
+    for (const snippet of canonicalExamples) {
+      expect(snippet.code, snippet.label).toContain('getDeduplicationJobId');
+      expect(snippet.code, snippet.label).toContain('removeDeduplicationKey');
+      expect(snippet.code, snippet.label).not.toContain('getJobByCustomId');
+    }
+    const networkExamples = snippets(management).filter(
+      (entry) => !['Bun', 'Node.js / Deno'].includes(entry.label)
+    );
     for (const snippet of networkExamples) {
       expect(snippet.code, snippet.label).not.toMatch(
         /getDeduplicationJobId|get_deduplication_job_id|stored as custom ids/i

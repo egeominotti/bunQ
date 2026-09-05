@@ -47,17 +47,17 @@ const worker = new Worker('queue', async (job) => {
 
 ```typescript
 const worker = new Worker('queue', async (job) => {
-  job.id;         // Job ID
-  job.name;       // Job name
-  job.data;       // Job data (typed if you use Worker<T>)
-  job.attempts;   // Attempts consumed so far
-  job.timestamp;  // When the job was created (epoch ms)
+  job.id;           // Job ID
+  job.name;         // Job name
+  job.data;         // Job data (typed if you use Worker<T>)
+  job.attemptsMade; // Attempts consumed so far (0 on the first attempt)
+  job.timestamp;    // When the job was created
 
   await job.updateProgress(50, 'Halfway done');  // Report progress
-  await job.log('Processing step 1');            // Attach a log line
+  await job.log('Processing step 1');             // Attach a log line
 
   return result;
-});
+}, { embedded: false });
 ```
 
 </TabItem>
@@ -155,7 +155,7 @@ worker =
 
 ## Pull and process a job manually
 
-The Bun client can disable the automatic loop and explicitly acquire one job:
+Both TypeScript packages can disable the automatic loop and explicitly acquire one job:
 
 ```typescript
 const worker = new Worker<{ value: number }, number>(
@@ -221,7 +221,7 @@ actual discard transport or engine failure emits one Worker `error` with
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Worker](/guide/worker/) | Create a worker and process your first job |
 | [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |

@@ -346,14 +346,16 @@ broker leaves both jobs and their dependency edge unchanged instead of creating
 a permanently blocked dependent. Change or remove the dependency explicitly
 before replacing that owner.
 
-`addBulk` is ordered but is not an all-or-nothing transaction. If a later entry
-fails, any earlier accepted prefix remains persisted, counted and runnable;
-entries after the failure are not evaluated. Use the flow API when the complete
-graph must commit atomically.
+On memory/SQLite brokers, `addBulk` uses accepted-prefix semantics: if a later
+entry fails, earlier accepted jobs remain persisted, counted, and runnable;
+later entries are not evaluated. PostgreSQL brokers instead roll back the
+complete batch transaction on an admission error. This applies to TCP clients
+as well as embedded calls. Use the flow API when the complete graph must commit
+atomically on every backend.
 :::
 
-Managing keys directly in Bun, or retaining an explicit custom job ID in the
-network SDKs when later lookup is required:
+Manage deduplication keys directly in either TypeScript package. In the other
+SDKs, retain an explicit custom job ID when later lookup is required:
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -370,9 +372,11 @@ const removed = await job?.removeDeduplicationKey(); // only if this generation 
 <TabItem label="Node.js / Deno">
 
 ```typescript
-const job = await queue.add('notification', data, { jobId: 'my-custom-job-id' });
-const sameJob = await queue.getJobByCustomId('my-custom-job-id');
-console.log(job.id === sameJob?.id); // true
+const jobId = await queue.getDeduplicationJobId('my-unique-key'); // look up
+await queue.removeDeduplicationKey('my-unique-key');              // allow re-adding
+
+const job = await queue.getJob(jobId!);
+const removed = await job?.removeDeduplicationKey(); // only if this generation owns it
 ```
 
 </TabItem>
@@ -425,16 +429,15 @@ job_id = if job, do: job.id, else: nil
 </TabItem>
 </Tabs>
 
-*The Bun queue lookup/removal methods work in embedded and TCP modes. Job-level
+*The shared TypeScript queue lookup/removal methods work in embedded and TCP modes. Job-level
 removal is generation-safe: a stale job cannot clear a key already transferred
-to a replacement job. Direct TTL deduplication-key removal is currently
-Bun-only; the Node.js/Deno SDK exposes `getDeduplicationJobId()` for lookup. A
-custom `jobId` is a separate value: network SDKs can look it up, but that query
-never resolves `deduplication.id`.*
+to a replacement job. Node.js and Deno support both `getDeduplicationJobId()`
+and `removeDeduplicationKey()`. A custom `jobId` is a separate value: the
+custom-ID lookups shown for the other SDKs never resolve `deduplication.id`.*
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
 | [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |

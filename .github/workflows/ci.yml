@@ -76,6 +76,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --ignore-scripts
 
+      - name: Build portable client artifacts for parity tests
+        run: bun run build:client
+
       - name: Run unit tests
         run: bun test --parallel=4
 

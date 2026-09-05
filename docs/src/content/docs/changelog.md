@@ -16,6 +16,26 @@ head:
 
 ## Unreleased
 
+### Canonical client parity
+
+- Build `bunqueue-client` from the canonical Bun client source, sharing Queue,
+  Worker, Job, FlowProducer, QueueEvents, QueueGroup, Simple Mode, groups,
+  processor batches, options, errors, events, and return contracts. Preserve
+  the historical SDK API at the explicit `/legacy` entry.
+- Block source/artifact drift and public declaration differences during the
+  SDK build. Run shared native contracts, differential generated histories,
+  and real package scenarios in Bun, Node, Deno, and Workers.
+- Keep TCP clients from initializing local embedded storage during DLQ reads
+  and asynchronous QueueGroup discovery.
+- Preserve embedded shard selection under container CPU quotas, reject
+  unreviewed Bun runtime access in portable builds, and verify strict NodeNext
+  declarations plus sandboxed processors across the supported runtimes.
+- Make archive cutoff regressions deterministic on Linux while retaining
+  mutation coverage of the inclusive timestamp boundary.
+- Audit the introductory, Queue, and Worker guides; correct token-bound
+  transitions, bulk-admission semantics, option references, SDK examples,
+  and empty table headings.
+
 ### CI/CD
 
 - Pin Bun to 1.4.2 across CI, SDK workflows, release images, and disposable test

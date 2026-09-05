@@ -4,17 +4,30 @@
  */
 
 import { createInterface } from 'node:readline';
-import { FlowProducer, Queue, UnrecoverableError, Worker } from '../../typescript/dist/index.js';
+import {
+  CommandError,
+  Connection,
+  FlowProducer,
+  Queue,
+  UnrecoverableError,
+  Worker,
+} from '../../typescript/dist/index.js';
 
 type Req = { id: number; op: string } & Record<string, unknown>;
 
 let connection: { host: string; port: number; token?: string } = { host: '127.0.0.1', port: 6789 };
 const queues = new Map<string, Queue>();
+const schedulerQueues = new Map<string, string>();
+let protocol: Connection | undefined;
+
+function protocolConnection(): Connection {
+  return (protocol ??= new Connection(connection));
+}
 
 function queueFor(name: string): Queue {
   let queue = queues.get(name);
   if (!queue) {
-    queue = new Queue(name, connection);
+    queue = new Queue(name, { connection });
     queues.set(name, queue);
   }
   return queue;
@@ -45,8 +58,8 @@ async function processUntil(req: Req): Promise<void> {
       return req.result ?? 'ok';
     },
     {
-      ...connection,
-      pollTimeoutMs: 300,
+      connection,
+      pollTimeout: 300,
       ...(req.batchSize !== undefined ? { batchSize: Number(req.batchSize) } : {}),
     }
   );
@@ -54,10 +67,10 @@ async function processUntil(req: Req): Promise<void> {
   worker.on('failed', () => {});
 
   const reached = async (): Promise<boolean> => {
-    const counts = await queue.getJobCounts();
+    const counts = await queue.getJobCountsAsync();
     if (until.completed !== undefined && (counts.completed ?? 0) < until.completed) return false;
     if (until.failed !== undefined && (counts.failed ?? 0) < until.failed) return false;
-    if (until.dlq !== undefined && (await queue.getDlq()).length < until.dlq) return false;
+    if (until.dlq !== undefined && (await queue.getDlqAsync()).length < until.dlq) return false;
     return true;
   };
 
@@ -106,7 +119,7 @@ async function handle(req: Req): Promise<Record<string, unknown>> {
       const parentId = String(req.parentId);
       const childId = String(req.childId);
       const queue = String(req.queue);
-      const producer = new FlowProducer(connection);
+      const producer = new FlowProducer({ connection });
       try {
         const node = await producer.add({
           name: 'parent',
@@ -124,7 +137,7 @@ async function handle(req: Req): Promise<Record<string, unknown>> {
         });
         return { parentId: node.job.id, childId: node.children?.[0]?.job.id };
       } finally {
-        producer.close();
+        await producer.close();
       }
     }
     case 'getJob': {
@@ -137,25 +150,36 @@ async function handle(req: Req): Promise<Record<string, unknown>> {
       };
     }
     case 'getJobByCustomId': {
-      const job = await queueFor(String(req.queue)).getJobByCustomId(String(req.customId));
-      return { job: job ? { id: job.id } : null };
+      // This protocol primitive has no canonical Queue convenience method.
+      try {
+        const response = await protocolConnection().call({
+          cmd: 'GetJobByCustomId',
+          customId: String(req.customId),
+        });
+        const job = response.job as { id: string } | undefined;
+        return { job: job ? { id: job.id } : null };
+      } catch (error) {
+        if (error instanceof CommandError && /job not found/i.test(error.message))
+          return { job: null };
+        throw error;
+      }
     }
     case 'getState':
       return { state: await queueFor('conf-lookup').getJobState(String(req.jobId)) };
     case 'getResult':
-      return { result: await queueFor('conf-lookup').getResult(String(req.jobId)) };
+      return { result: (await queueFor('conf-lookup').getJob(String(req.jobId)))?.returnvalue };
     case 'count':
-      return { count: await queueFor(String(req.queue)).count() };
+      return { count: await queueFor(String(req.queue)).countAsync() };
     case 'isPaused':
-      return { paused: await queueFor(String(req.queue)).isPaused() };
+      return { paused: await queueFor(String(req.queue)).isPausedAsync() };
     case 'pause':
-      await queueFor(String(req.queue)).pause();
+      await queueFor(String(req.queue)).pauseAsync();
       return {};
     case 'resume':
-      await queueFor(String(req.queue)).resume();
+      await queueFor(String(req.queue)).resumeAsync();
       return {};
     case 'drain':
-      return { count: await queueFor(String(req.queue)).drain() };
+      return { count: await queueFor(String(req.queue)).drainAsync() };
     case 'promote':
       await queueFor('conf-lookup').promoteJob(String(req.jobId));
       return {};
@@ -172,23 +196,35 @@ async function handle(req: Req): Promise<Record<string, unknown>> {
         repeat,
         template
       );
+      schedulerQueues.set(String(req.schedulerId), String(req.queue));
       return {};
     }
     case 'getScheduler':
-      return { scheduler: await queueFor('conf-lookup').getJobScheduler(String(req.schedulerId)) };
-    case 'removeScheduler':
-      await queueFor('conf-lookup').removeJobScheduler(String(req.schedulerId));
-      return {};
-    case 'waitForJob':
       return {
-        result: await queueFor('conf-lookup').waitForJob(String(req.jobId), Number(req.timeoutMs)),
+        scheduler: await queueFor(
+          schedulerQueues.get(String(req.schedulerId)) ?? 'conf-lookup'
+        ).getJobScheduler(String(req.schedulerId)),
       };
+    case 'removeScheduler':
+      await queueFor(
+        schedulerQueues.get(String(req.schedulerId)) ?? 'conf-lookup'
+      ).removeJobScheduler(String(req.schedulerId));
+      schedulerQueues.delete(String(req.schedulerId));
+      return {};
+    case 'waitForJob': {
+      const timeout = Math.min(600000, Math.max(0, Number(req.timeoutMs)));
+      const response = await protocolConnection().call(
+        { cmd: 'WaitJob', id: String(req.jobId), timeout },
+        timeout + 1000
+      );
+      return { result: response.completed ? response.result : null };
+    }
     case 'getDlqCount':
-      return { count: (await queueFor(String(req.queue)).getDlq()).length };
+      return { count: (await queueFor(String(req.queue)).getDlqAsync()).length };
     case 'retryDlq':
-      return { count: await queueFor(String(req.queue)).retryDlq() };
+      return { count: await queueFor(String(req.queue)).retryDlqAsync() };
     case 'hello': {
-      const hello = (await queueFor('conf-lookup').connection.hello()) as {
+      const hello = (await protocolConnection().hello()) as {
         protocolVersion?: number;
         capabilities?: string[];
       };
@@ -199,6 +235,7 @@ async function handle(req: Req): Promise<Record<string, unknown>> {
       return {};
     case 'close':
       for (const queue of queues.values()) queue.close();
+      protocol?.close();
       setTimeout(() => process.exit(0), 50);
       return {};
     default:

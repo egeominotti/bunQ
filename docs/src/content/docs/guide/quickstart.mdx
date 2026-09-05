@@ -49,14 +49,18 @@ await queue.add('welcome', { to: 'user@example.com', subject: 'Welcome!' });
 ```typescript
 import { Queue, Worker } from 'bunqueue-client';
 
-// The queue: where you put jobs (connects to localhost:6789 by default)
-const queue = new Queue('emails');
+// The queue: where you put jobs
+const queue = new Queue('emails', { embedded: false });
 
 // The worker: pulls jobs and runs your function on each one
-const worker = new Worker('emails', async (job) => {
-  console.log(`Sending "${job.data.subject}" to ${job.data.to}`);
-  return { sent: true };
-});
+const worker = new Worker(
+  'emails',
+  async (job) => {
+    console.log(`Sending "${job.data.subject}" to ${job.data.to}`);
+    return { sent: true };
+  },
+  { embedded: false }
+);
 
 // Add a job
 await queue.add('welcome', { to: 'user@example.com', subject: 'Welcome!' });
@@ -252,7 +256,7 @@ interface EmailJob {
   to: string;
   subject: string;
 }
-const emailQueue = new Queue<EmailJob>('emails');
+const emailQueue = new Queue<EmailJob>('emails', { embedded: false });
 
 // Priority, delay, retries
 await emailQueue.add(
@@ -418,6 +422,7 @@ const worker = new Worker<EmailJob>(
     return { sent: true, timestamp: Date.now() }; // Result, stored and queryable
   },
   {
+    embedded: false,
     concurrency: 5, // Process 5 jobs in parallel
   }
 );
@@ -668,9 +673,10 @@ process.on('SIGINT', async () => {
 <TabItem label="Node.js / Deno">
 
 ```typescript
+import { shutdownManager } from 'bunqueue-client';
+
 process.on('SIGINT', async () => {
-  await worker.close(); // Stop pulling, drain in-flight jobs
-  queue.close(); // Close the connection
+  await worker.close(); // Finish active jobs
   process.exit(0);
 });
 ```
@@ -725,7 +731,7 @@ Bunqueue.Worker.stop(worker)
 
 The Bun examples above run in a single process. When multiple services need to share one queue, run bunqueue as a standalone server instead:
 
-|              | Embedded mode                   | Server mode                                                           |
+| Comparison | Embedded mode                   | Server mode                                                           |
 | ------------ | ------------------------------- | --------------------------------------------------------------------- |
 | **Best for** | Single-process apps, serverless | Multi-process, microservices                                          |
 | **Setup**    | `embedded: true`                | Run `bunx bunqueue start`, drop the option                            |
@@ -765,6 +771,7 @@ await app.cron('daily-report', '0 9 * * *', { type: 'summary' });
 import { Bunqueue } from 'bunqueue-client';
 
 const app = new Bunqueue('notifications', {
+  embedded: false,
   routes: {
     'send-email': async (job) => ({ sent: true }),
     'send-sms': async (job) => ({ sent: true }),

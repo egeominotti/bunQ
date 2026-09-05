@@ -69,6 +69,11 @@ export function getSharedManager(dataPath?: string): QueueManager {
 }
 
 /** Shutdown shared manager */
+/** Inspect an existing manager without initializing an embedded runtime. */
+export function peekSharedManager(): SharedManager | null {
+  return shared?.instance ?? null;
+}
+
 export function shutdownManager(): void {
   const current = shared;
   shared = null;

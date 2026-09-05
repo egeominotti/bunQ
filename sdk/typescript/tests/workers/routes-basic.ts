@@ -1,6 +1,6 @@
 /** Workers e2e — basic routes: produce, query, control, payload edges. */
 
-import { Queue } from 'bunqueue-client';
+import { Queue } from 'bunqueue-client/legacy';
 
 export interface Env {
   BQ_HOST: string;

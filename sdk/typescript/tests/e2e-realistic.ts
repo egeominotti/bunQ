@@ -7,7 +7,7 @@
  * verifies that concurrent processing never crosses persisted results.
  */
 
-import { Bunqueue, UnrecoverableError } from '../dist/index.js';
+import { Bunqueue, UnrecoverableError } from '../dist/legacy.js';
 import {
   assert,
   assertEq,

@@ -4,7 +4,7 @@ export const sdkSandboxSuites = [
     command: [
       'bash',
       '-c',
-      "cd sdk/typescript && bun run build && bun run check && bun run test:property && mkdir -p /tmp/typescript-package && bun pm pack --destination /tmp/typescript-package && bun tests/integration.ts && bun tests/e2e.ts && bun run test:workers && cd ../conformance && env -u BUNQUEUE_CONFORMANCE_POSTGRES_URL bun runner.ts --driver 'bun drivers/typescript.ts' && bun runner.ts --driver 'bun drivers/typescript.ts'",
+      "cd sdk/typescript && bun run build && bun run test:parity && bun run test:shared-contract && bun run test:canonical && node tests/canonical-queue.mjs && node tests/canonical-worker.mjs && node20 tests/canonical-queue.mjs && node20 tests/canonical-worker.mjs && deno run -A tests/canonical-queue.mjs && deno run -A tests/canonical-worker.mjs && bun run check && bun run test:property && mkdir -p /tmp/typescript-package && bun pm pack --destination /tmp/typescript-package && bun tests/integration.ts && bun tests/e2e.ts && bun run test:workers && cd ../conformance && env -u BUNQUEUE_CONFORMANCE_POSTGRES_URL bun runner.ts --driver 'bun drivers/typescript.ts' && bun runner.ts --driver 'bun drivers/typescript.ts'",
     ],
   },
   {

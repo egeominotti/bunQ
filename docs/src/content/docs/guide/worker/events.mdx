@@ -53,7 +53,11 @@ worker.on('failed', (job, error) => {
   console.error(`Failed: ${job.id}`, error.message);
 });
 
-worker.on('error', (err) => console.error(err)); // always attach
+worker.on('progress', (job, progress) => {
+  console.log(`Progress: ${job.id} - ${progress}%`);
+});
+
+worker.on('error', (error) => console.error(error)); // always attach
 ```
 
 </TabItem>
@@ -136,7 +140,7 @@ lifecycle, but it does not synthesize `completed`/`failed` listener events.
 Record per-job outcomes inside the processor. See the
 [SDK guide](/guide/sdks/#worker-events).*
 
-All Bun client events are fully typed. The complete list (external SDK event sets are listed in the [SDK guide](/guide/sdks/#worker-events)):
+All shared TypeScript client events are fully typed. The complete list (other SDK event sets are listed in the [SDK guide](/guide/sdks/#worker-events)):
 
 | Event | Callback Parameters | Description |
 |-------|-------------------|-------------|
@@ -167,7 +171,7 @@ broker accepts `retry()`, `changeDelay()`, `moveToWait()`, `moveToDelayed()`,
 ACK/FAIL. A real asynchronous `discard()` rejection emits exactly one Worker
 `error`; an authoritative already-absent result is silent.
 
-For the Bun client, `stalled` is queue-scoped in both embedded and TCP mode.
+For both TypeScript packages, `stalled` is queue-scoped in embedded and TCP mode.
 TCP workers receive it through a dedicated authenticated event connection that
 automatically re-subscribes after reconnect. `skipStalledCheck: true` disables
 only that listener, never broker-side stall recovery. The event is also emitted
@@ -179,7 +183,7 @@ Remove a listener with `worker.off('completed', handler)`.
 
 ## Where to go next
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Worker](/guide/worker/) | Create a worker and process your first job |
 | [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |

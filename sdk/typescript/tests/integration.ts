@@ -1,5 +1,5 @@
 /**
- * Integration smoke suite — mirrors sdk/python/tests/test_integration.py.
+ * Legacy API integration smoke suite — mirrors sdk/python/tests/test_integration.py.
  *
  * Run with any runtime:
  *   bun tests/integration.ts
@@ -14,7 +14,7 @@ import {
   type Job,
   MAX_FRAME_SIZE,
   SerializationError,
-} from '../dist/index.js';
+} from '../dist/legacy.js';
 import {
   assert,
   assertEq,
@@ -38,7 +38,7 @@ test('outgoing frames reject payloads above the 64 MiB protocol cap', () => {
 });
 
 test('serialization failure does not retain an in-flight slot', async () => {
-  const telemetry: import('../dist/index.js').TelemetryEvent[] = [];
+  const telemetry: import('../dist/legacy.js').TelemetryEvent[] = [];
   const conn = new Connection({
     host: '127.0.0.1',
     port: getPort(),

@@ -1,5 +1,5 @@
 /**
- * E2E suite entrypoint — registers every area module, then runs the suite
+ * Legacy API E2E entrypoint — registers every area module, then runs the suite
  * against a freshly spawned bunqueue server.
  *
  * Run with any runtime:

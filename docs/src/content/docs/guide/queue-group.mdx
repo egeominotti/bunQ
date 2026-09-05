@@ -50,18 +50,22 @@ const invoiceWorker = billing.getWorker('invoices', async (job) => {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-import { Queue, Worker } from 'bunqueue-client';
+import { QueueGroup } from 'bunqueue-client';
 
-const invoices = new Queue('billing:invoices');
-const payments = new Queue('billing:payments');
+const billing = new QueueGroup('billing');
+
+// Queues are automatically prefixed
+const invoices = billing.getQueue('invoices', { embedded: false });   // "billing:invoices"
+const payments = billing.getQueue('payments', { embedded: false });   // "billing:payments"
 
 await invoices.add('create', { amount: 100 });
 await payments.add('process', { orderId: '123' });
 
-const invoiceWorker = new Worker('billing:invoices', async (job) => ({
-  processed: true,
-  invoice: job.data,
-}));
+// Workers use the same prefixed names
+const invoiceWorker = billing.getWorker('invoices', async (job) => {
+  console.log('Processing invoice:', job.data);
+  return { processed: true };
+}, { embedded: false });
 ```
 
 </TabItem>
@@ -156,10 +160,10 @@ Bunqueue.Worker.run(invoice_worker) # blocking loop
 </TabItem>
 </Tabs>
 
-In Bun, `getQueue` and `getWorker` accept the same options as `Queue` and
-`Worker`, including embedded mode. The network SDK examples create normal
-queues and workers with the same prefixed broker names, which is the portable
-equivalent.
+Both TypeScript packages expose `QueueGroup`; `getQueue` and `getWorker`
+accept the same options as `Queue` and `Worker`. Node.js and Deno use TCP.
+Use the `Async` group methods to act on registered remote queues. The other
+SDK examples create normal queues and workers with the same prefixed names.
 
 ## Common Tasks
 
@@ -186,11 +190,11 @@ await billing.obliterateAllAsync();
 <TabItem label="Node.js / Deno">
 
 ```typescript
-const queues = [invoices, payments];
-await Promise.all(queues.map((queue) => queue.pause()));
-await Promise.all(queues.map((queue) => queue.resume()));
-const removed = await Promise.all(queues.map((queue) => queue.drain()));
-await Promise.all(queues.map((queue) => queue.obliterate()));
+const names = await billing.listQueuesAsync(); // registered remote queue names
+await billing.pauseAllAsync();
+await billing.resumeAllAsync();
+const removed = await billing.drainAllAsync();
+await billing.obliterateAllAsync();
 ```
 
 </TabItem>
@@ -288,8 +292,11 @@ const tasksB = tenantB.getQueue('tasks', { embedded: true });  // "tenant-b:task
 <TabItem label="Node.js / Deno">
 
 ```typescript
-const tasksA = new Queue('tenant-a:tasks');
-const tasksB = new Queue('tenant-b:tasks');
+const tenantA = new QueueGroup('tenant-a');
+const tenantB = new QueueGroup('tenant-b');
+
+const tasksA = tenantA.getQueue('tasks', { embedded: false });  // "tenant-a:tasks"
+const tasksB = tenantB.getQueue('tasks', { embedded: false });  // "tenant-b:tasks"
 ```
 
 </TabItem>
@@ -352,7 +359,9 @@ const queue = group.getQueue('jobs', { embedded: true });
 
 ```typescript
 const env = process.env.NODE_ENV || 'development';
-const queue = new Queue(`${env}-tasks:jobs`);
+const group = new QueueGroup(`${env}-tasks`);
+const queue = group.getQueue('jobs', { embedded: false });
+// "development-tasks:jobs" or "production-tasks:jobs"
 ```
 
 </TabItem>

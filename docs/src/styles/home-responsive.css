@@ -1,0 +1,30 @@
+/* Narrow layouts keep setup choices and runtime names readable. */
+@media (max-width: 767px) {
+  .bq-home {
+    padding-inline: 16px;
+  }
+  .bq-home .home-hero {
+    grid-template-columns: 1fr;
+    padding-block: 36px;
+    gap: 36px;
+  }
+  .home-facts {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .bq-home .home-hero h1 {
+    font-size: clamp(2rem, 10vw, 2.75rem);
+  }
+  .home-engine-license {
+    display: none;
+  }
+  .home-topology-engine div {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .home-language-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

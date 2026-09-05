@@ -392,9 +392,11 @@ Understanding four facts about the transport explains most SDK behavior:
    TypeScript through synchronous write ordering, Python through a
    connection lock (safe under free-threaded concurrency), and PHP, Go,
    Rust, and Elixir inside the connect sequence itself.
-4. **The job name travels inside `data`**: `add('welcome', {to})` is
-   encoded as `data: { name: 'welcome', to }`. Non-object payloads are
-   wrapped as `{ name, payload }`.
+4. **Job names and payloads stay separate**: protocol v3 encodes
+   `add('welcome', {to})` as `name: 'welcome', data: {to}`. Scalars,
+   arrays and `null` remain unchanged in `data`, and a user-owned
+   `data.name` is preserved. Workers receive the separate `job.name`
+   and original `job.data` values.
 
 ### Connection options
 

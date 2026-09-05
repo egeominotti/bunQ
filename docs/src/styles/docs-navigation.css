@@ -1,0 +1,228 @@
+/* Shared navigation: readable labels, clear location and stable touch targets. */
+:root {
+  --docs-muted: #b4b4bf;
+  --docs-accent: #f472b6;
+  --docs-tint: #271923;
+  --docs-line: #2c2c32;
+  --docs-panel: #141416;
+  --docs-display: 'Bricolage Grotesque Variable', var(--sl-font-system);
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --docs-muted: #5c5c68;
+  --docs-accent: #b91c62;
+  --docs-tint: #fdf2f8;
+  --docs-line: #e5e5eb;
+  --docs-panel: #fafafa;
+  color-scheme: light;
+}
+
+body :is(a, button, summary, select, input):focus-visible {
+  outline: 2px solid var(--docs-accent);
+  outline-offset: 3px;
+}
+
+body :is(button, summary, select) {
+  touch-action: manipulation;
+}
+
+.header .docs-search {
+  min-width: 0;
+}
+
+.header .header-cta {
+  color: #21101a;
+  background: var(--docs-accent);
+  border-radius: 8px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+:root[data-theme='light'] .header .header-cta {
+  color: #fff;
+}
+
+.header .nav-links a {
+  color: var(--docs-muted);
+}
+
+.header .nav-links a:hover {
+  color: var(--docs-accent);
+}
+
+nav.sidebar .sidebar-content {
+  padding: 20px 16px;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+
+nav.sidebar .top-level > li {
+  border: 0;
+  margin-bottom: 12px;
+}
+
+nav.sidebar .top-level > li > details > summary,
+nav.sidebar .top-level > li > a {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--sl-color-text);
+  padding: 8px 10px;
+}
+
+nav.sidebar .group-label .large {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+nav.sidebar ul ul a {
+  color: var(--docs-muted);
+  padding: 7px 12px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  border-radius: 6px;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+nav.sidebar ul ul li {
+  border-color: var(--docs-line);
+}
+
+nav.sidebar a[aria-current='page'] {
+  color: var(--docs-accent);
+  background: var(--docs-tint);
+  border-left: 2px solid var(--docs-accent);
+  padding-left: 10px;
+  font-weight: 600;
+}
+
+nav.sidebar summary:hover,
+nav.sidebar ul ul a:hover {
+  color: var(--docs-accent);
+  background: var(--docs-tint);
+}
+
+.right-sidebar starlight-toc nav {
+  padding-top: 14px;
+}
+
+.right-sidebar starlight-toc h2 {
+  margin-bottom: 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.right-sidebar starlight-toc a {
+  display: block;
+  border-left: 2px solid transparent;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--docs-muted);
+}
+
+.right-sidebar starlight-toc a[aria-current='true'] {
+  color: var(--docs-accent);
+  border-left-color: var(--docs-accent);
+  background: var(--docs-tint);
+}
+
+.docs-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-block: 6px 22px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--docs-line);
+  font-size: 0.78rem;
+}
+
+.docs-context nav {
+  min-width: 0;
+}
+
+.docs-context ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  color: var(--docs-muted);
+}
+
+.docs-context li + li::before {
+  content: '/';
+  margin-right: 8px;
+  color: var(--docs-muted);
+}
+
+.docs-context a {
+  color: var(--docs-muted);
+  text-decoration: none;
+}
+
+.docs-context a:hover {
+  color: var(--docs-accent);
+  text-decoration: underline;
+}
+
+.docs-context [aria-current='page'] {
+  color: var(--sl-color-text);
+  font-weight: 500;
+}
+
+.docs-source-link {
+  flex-shrink: 0;
+}
+
+@media (min-width: 50rem) {
+  .header .header-cta-mobile {
+    display: none;
+  }
+  .header.header {
+    grid-template-columns: minmax(180px, 240px) minmax(140px, 1fr) auto;
+  }
+}
+
+@media (min-width: 72rem) {
+  :root[data-has-sidebar] .right-sidebar-container,
+  :root[data-has-sidebar] .right-sidebar {
+    width: 15rem;
+  }
+  :root[data-has-sidebar][data-has-toc] .main-pane {
+    width: calc(100% - 15rem);
+  }
+}
+
+@media (min-width: 50rem) and (max-width: 72rem) {
+  .header .nav-links {
+    display: none;
+  }
+}
+
+@media (min-width: 50rem) and (max-width: 64rem) {
+  :root[data-has-sidebar] {
+    --sl-sidebar-width: 15rem;
+  }
+}
+
+@media (max-width: 49.99rem) {
+  nav.sidebar ul ul a,
+  nav.sidebar summary {
+    min-height: 44px;
+  }
+  .docs-source-link {
+    padding-block: 6px;
+  }
+  .docs-context {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+  }
+}

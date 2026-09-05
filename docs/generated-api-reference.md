@@ -1,6 +1,6 @@
 # Generated API Reference
 
-> **Category:** Documentation tooling · **Source:** `typedoc.json`, `tsconfig.typedoc.json`, `scripts/build-api-reference.ts`, `docs/typedoc-theme.css`, `docs/src/content/docs/reference.mdx`, `docs/src/data/apiVersions.json`
+> **Category:** Documentation tooling · **Source:** `typedoc.json`, `tsconfig.typedoc.json`, `scripts/build-api-reference.ts`, `docs/typedoc-theme.css`, `docs/src/content/docs/reference.mdx`, `docs/src/data/apiVersions.json`, `docs/src/lib/reference-seo.ts`, `docs/src/lib/sitemap.ts`
 
 ## Purpose
 
@@ -17,7 +17,9 @@ bun run docs:api              # build for the current package.json version
 bun run docs:api -- --dev     # build to /reference/dev/, for unreleased work
 ```
 
-Output: `docs/public/reference/<version>/`, which Astro copies verbatim into `dist/`.
+Output: `docs/public/reference/<version>/`, which Astro copies into `dist/`.
+The documentation build adds current-version search metadata to the copied HTML;
+it never rewrites the committed reference trees.
 
 ## Version keying
 
@@ -103,13 +105,46 @@ unaffected. Unit coverage for the scanners lives in `test/check-docs-data.test.t
 
 The version banner is the one piece of markup injected by the script, because TypeDoc has no slot for site chrome. It answers the two questions its own header cannot: which version am I reading, and how do I get back. Injection is idempotent, guarded by a check for `bq-ref-banner`, so re-running the build does not stack banners.
 
-`injectHead()` adds a second, separately-guarded injection: `<meta name="robots" content="noindex, follow">`, but **only on trees that are not the current version** (`shouldNoindex(version, current)`). The current tree stays indexable on purpose — TypeDoc writes real per-page titles (`Worker | bunqueue`, `StallConfig | bunqueue`; the bare `bunqueue` title is on two files, `index.html` and `hierarchy.html`), so a search for a type name landing on that type is useful. What must not accumulate is one near-identical tree per released version: all 250 HTML pages in the current v2.9 tree share the description `Documentation for bunqueue` and carry no canonical, so an indexed v2.8 next to an indexed v2.9 is self-competition that grows with every release. `--dev` previews never index.
+`injectHead()` adds a second, separately-guarded injection: `<meta name="robots" content="noindex, follow">`, but **only on trees that are not the current version** (`shouldNoindex(version, current)`). The current tree stays indexable on purpose: a search for a type name should be able to reach its reference page. Older trees and `--dev` previews never index, so near-identical pages do not compete across every released version.
 
 Demotion happens on the release that supersedes a tree, not when the tree is written: `main()` injects into the tree TypeDoc just produced, then walks every sibling version directory and re-runs the same injection with `noindex` on each one that is no longer current. Without that second pass the policy could never fire for a released version — a tree is only ever generated while it _is_ current, so it would keep the indexable head it was born with and each release would add another near-identical competitor. Both passes are idempotent, so re-running costs nothing.
 
 The two injections need independent guards. A shared one is wrong in both directions: the committed tree already carries banners, so a `bq-ref-banner` check would skip the meta on every existing file, and a tree that predates the banner would never get chrome. `injectBanner` also asserts a post-condition — a page that ends without a robots meta _inside its `<head>`_ exits the build non-zero, because a silently unmatched `replace` is exactly how the wrong `depth` shipped on 234 pages. Placement, not presence: `<head(\s[^>]*)?>` is attribute-tolerant like `<body>` above, and the `\s` is load-bearing, because `<head([^>]*)>` also matches the `<header class="tsd-page-toolbar">` TypeDoc puts on every page — on a page with no `<head>` the meta would land inside that element, still present and no longer a directive.
 
-The generated pages are not in the sitemap either way: `@astrojs/sitemap` only enumerates Astro routes, and this tree is copied verbatim from `docs/public/`.
+### Canonicals, metadata, and sitemap
+
+TypeDoc's default metadata is incomplete for a published versioned site: every
+page starts with the same generic description, no canonical, and some types
+share a title. `docs/src/lib/reference-seo.ts` fixes the copied current-version
+HTML in Astro's `astro:build:done` hook. Titles and descriptions identify the
+symbol kind, module, and version; the index and hierarchy have separate metadata.
+Open Graph and Twitter metadata use the same per-page values. Injection escapes
+HTML attributes and replaces owned tags idempotently, preserving scripts, page
+content, and unrelated head elements. A missing head or a current page carrying
+`noindex` fails the build rather than publishing an indexing conflict.
+
+The integration reads `apiVersions.json` through the Astro configuration and
+enumerates only the current tree. It supplies those URLs through
+[`@astrojs/sitemap`'s `customPages` option](https://docs.astro.build/en/guides/integrations-guide/sitemap/#custompages),
+because copied public HTML is not an Astro route. Directory indexes canonicalize
+to `/reference/v2.9/`; other TypeDoc pages retain their actual `.html` paths.
+The sitemap contains one URL per current page and excludes historical and
+development versions. The 262 current v2.9 pages join the 119 authored pages,
+for 381 canonical URLs. `docs/src/lib/sitemap.ts` preserves the authored-route
+priorities and git-derived modification dates; unknown dates remain absent.
+
+`docs/vercel.json` applies a hosting-level `noindex` header only to raw Markdown.
+A blanket `/reference/v:version/(.*)` header would also block the current tree,
+overriding this policy, so it is explicitly prohibited by regression coverage.
+Historical version exclusions come from their HTML robots metadata.
+
+The post-build discovery validator checks exact sitemap membership, matching
+canonical tags, titles and descriptions, unique current-reference metadata,
+historical/development `noindex`, and the hosting policy. It also retains the
+independent 104-page `llms-full.txt` coverage check; generated TypeDoc pages are
+not added to that hand-authored document stream. Focused fixtures in
+`test/docs-seo.test.ts` exercise URL selection, encoding, metadata escaping,
+idempotence, build failures, and preservation of source and historical trees.
 
 Its "all versions" link is depth-relative: `allVersionsHref(depth)` returns `../` for a
 page at the version root and one more `../` per directory below it, so every page lands
@@ -143,7 +178,7 @@ curl -o /dev/null -w '%{http_code}\n' http://localhost:4399/reference/v2.9/
 
 Generating at deploy time would only ever produce the _current_ version, because an older tree cannot be regenerated from today's source. Serving `/reference/v2.6/` after 2.8 ships requires the v2.6 tree to exist in the repo. Versioned references and build-time generation are mutually exclusive; this design chooses versioning.
 
-The current cost is **about 5.4 MB and 259 files per minor version** (v2.9 measured). Ten similarly sized minor versions would be roughly 54 MB of mostly-static HTML.
+The current cost is **about 5.25 MB and 271 files per minor version** (v2.9 measured). Ten similarly sized minor versions would be roughly 52.5 MB of mostly-static HTML.
 
 If that becomes a problem, the options, in increasing effort:
 

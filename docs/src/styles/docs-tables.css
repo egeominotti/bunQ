@@ -1,0 +1,89 @@
+/* Tables preserve their native semantics and scroll within the reading column. */
+.sl-markdown-content .docs-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--docs-line);
+  border-radius: 8px;
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+  margin-block: 24px;
+}
+
+.docs-table-scroll[data-overflow] {
+  background: linear-gradient(to left, var(--docs-panel), transparent 24px) right / 24px 100%
+    no-repeat;
+}
+
+.docs-table-scroll:focus-visible {
+  outline: 2px solid var(--docs-accent);
+  outline-offset: 4px;
+}
+
+.sl-markdown-content .docs-table-scroll > table {
+  display: table !important;
+  table-layout: auto !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: none !important;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+  font-size: 0.88rem;
+}
+
+.sl-markdown-content table :is(th, td) {
+  padding: 12px 16px !important;
+  line-height: 1.65;
+  vertical-align: top;
+  font-variant-numeric: tabular-nums;
+}
+
+.sl-markdown-content table th {
+  color: var(--sl-color-text);
+  background: var(--docs-panel) !important;
+  font-size: 0.83rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: normal;
+}
+
+.sl-markdown-content table td {
+  color: var(--sl-color-text);
+  border-color: var(--docs-line) !important;
+}
+
+.sl-markdown-content table td:first-child {
+  font-weight: 500;
+}
+
+.sl-markdown-content .docs-table-scroll table :is(th, td) {
+  min-width: 8rem;
+  overflow-wrap: break-word;
+}
+
+.sl-markdown-content .docs-table-scroll table code {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.sl-markdown-content table tbody tr:hover {
+  background: var(--docs-panel);
+}
+
+@media (max-width: 49.99rem) {
+  .sl-markdown-content table {
+    display: block !important;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .sl-markdown-content .docs-table-scroll > table {
+    display: table !important;
+  }
+  .sl-markdown-content table :is(th, td) {
+    padding: 10px 12px !important;
+    font-size: 0.83rem;
+  }
+}

@@ -40,7 +40,8 @@ export const getStaticPaths: GetStaticPaths = async () => {
     .filter((e) => e.id !== '404')
     .map((e) => {
       const m = (e.body ?? '').match(/class="bq-eyebrow">([^<]+)</);
-      const eyebrow = (m ? m[1] : e.id.replace(/\//g, ' · ')).trim();
+      const eyebrow =
+        e.id === 'index' ? 'Free & open source' : (m ? m[1] : e.id.replace(/\//g, ' · ')).trim();
       return { params: { slug: e.id }, props: { title: e.data.title, eyebrow } };
     });
 };
@@ -115,7 +116,7 @@ export const GET: APIRoute = async ({ props }) => {
             color: '#ff59a6',
             fontWeight: 600,
           },
-          eyebrow,
+          eyebrow
         ),
         el(
           'div',
@@ -129,20 +130,23 @@ export const GET: APIRoute = async ({ props }) => {
             maxHeight: 360,
             overflow: 'hidden',
           },
-          title,
+          title
         ),
         el(
           'div',
           { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 30 },
           [
             el('div', { display: 'flex', alignItems: 'center' }, [
-              { type: 'img', props: { width: 42, height: 42, src: MARK_URI, style: { marginRight: 18 } } },
+              {
+                type: 'img',
+                props: { width: 42, height: 42, src: MARK_URI, style: { marginRight: 18 } },
+              },
               el('div', { display: 'flex', fontWeight: 700 }, 'bunqueue'),
             ]),
             el('div', { display: 'flex', color: '#a89eb4', fontSize: 26 }, 'bunqueue.dev'),
-          ],
+          ]
         ),
-      ],
+      ]
     );
 
     const svg = await r.satori(tree, { width: 1200, height: 630, fonts: r.fonts });

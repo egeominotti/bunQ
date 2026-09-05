@@ -1,5 +1,7 @@
 ---
 import Default from '@astrojs/starlight/components/MarkdownContent.astro';
+import DocsContext from './DocsContext.astro';
+import DocsTables from './DocsTables.astro';
 
 /**
  * Wraps Starlight's MarkdownContent. On blog posts it adds a meta line
@@ -7,9 +9,10 @@ import Default from '@astrojs/starlight/components/MarkdownContent.astro';
  * conversion footer below it, automatically for every current and
  * future post. On the changelog it loads the month filter.
  */
-const { entry, id } = Astro.locals.starlightRoute;
+const { entry, id, hasSidebar } = Astro.locals.starlightRoute;
 const isBlogPost = id.startsWith('blog/') && id !== 'blog';
 const isChangelog = id === 'changelog';
+const hasCustomHero = id === 'index' || id === '' || (entry.body ?? '').includes('bq-hero');
 
 let dateLabel = '';
 let minutes = 0;
@@ -38,7 +41,11 @@ if (isBlogPost) {
   )
 }
 
+{hasCustomHero && <span id="_top" class="docs-content-start" tabindex="-1" />}
+{hasSidebar && hasCustomHero && <DocsContext />}
+
 <Default><slot /></Default>
+<DocsTables />
 
 {isChangelog && <script is:inline src="/bq-changelog.js" />}
 

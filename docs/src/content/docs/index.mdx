@@ -1,6 +1,6 @@
 ---
-title: 'The Bun Job Queue: SQLite or PostgreSQL, No Redis'
-description: 'A complete Bun job queue: memory or one-file SQLite for one process, or PostgreSQL 15–18 multi-broker mode, with priorities, retries, cron, DLQ, and six SDKs.'
+title: 'Free, Open Source Job Queue for Your Stack'
+description: 'bunqueue is a free, MIT-licensed job queue for Node.js, Deno, Python, PHP, Go, Rust, Elixir and Bun. Run the included Bun-powered server yourself, or use embedded mode on Bun. No Redis required.'
 template: splash
 head:
   - tag: meta
@@ -18,1025 +18,201 @@ head:
   - tag: meta
     attrs:
       name: 'twitter:title'
-      content: 'bunqueue: One-File SQLite or Multi-Broker PostgreSQL'
+      content: 'bunqueue: Free, Open Source Job Queue for Your Stack'
   - tag: meta
     attrs:
       name: 'twitter:description'
-      content: 'A complete Bun job queue with memory or one-file SQLite, plus optional PostgreSQL 15–18 multi-broker persistence. No Redis required.'
+      content: 'Your language. A Bun-powered engine. Free under MIT, including the server and every queue feature. Run locally or on your own infrastructure.'
   - tag: meta
     attrs:
       name: 'keywords'
-      content: 'job queue, task queue, background jobs, bun, postgres queue, postgresql job queue, multi-broker queue, node.js, deno, python, cloudflare workers, bullmq alternative, redis alternative, sqlite queue, cron jobs, dead letter queue, message queue, worker queue'
-  - tag: script
-    attrs:
-      type: 'application/ld+json'
-    content: '{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can SQLite handle a production queue?","acceptedAnswer":{"@type":"Answer","text":"In WAL mode, yes: reads and writes overlap and the write path batches persistence. A native repeated-process campaign measured 186K jobs/sec public on-disk Embedded addBulk and 159K TCP PUSHB; the separate 729K figure is explicitly an internal in-memory batch path."}},{"@type":"Question","name":"Can bunqueue run multiple active brokers?","acceptedAnswer":{"@type":"Answer","text":"Yes. Standalone servers can use PostgreSQL 15 through 18 as one authoritative store. Brokers coordinate transactional claims, fenced leases, durable events, shared limits, cron, workers, results and DLQ state. PostgreSQL 18.6 is recommended."}},{"@type":"Question","name":"What happens on a crash?","acceptedAnswer":{"@type":"Answer","text":"With SQLite or PostgreSQL persistence configured, a restart recovers waiting, delayed and active jobs that were durably admitted. A worker that dies mid-job is caught by stall detection and its jobs are requeued. Jobs that keep failing land in the dead letter queue, kept and retryable."}},{"@type":"Question","name":"Locks? \"database is locked\"?","acceptedAnswer":{"@type":"Answer","text":"SQLite uses exactly one process to open the file, embedded in your app or as the server, with any number of workers over TCP. For several active broker processes, use PostgreSQL multi-broker mode instead of sharing one SQLite file."}}]}'
+      content: 'free job queue, open source job queue, background jobs, bun, node.js, deno, python, php, go, rust, elixir, bullmq alternative, sqlite queue, postgresql job queue, no redis'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
-import VersionPill from '@components/VersionPill.astro';
-import BootTerminal from '@components/BootTerminal.astro';
-import BqIcon from '@components/BqIcon.astro';
+import HomeHero from '@components/home/HomeHero.astro';
+import HomeDetails from '@components/home/HomeDetails.astro';
 
-<div class="bq-wrap bq-hero">
-  <div class="bq-hero-grid">
-    <div class="bq-hero-left">
-      <VersionPill />
-      <h1 class="bq-hero-h1"><span class="bq-h1-brand">bunqueue.</span><br class="bq-h1-br"/><span class="bq-h1-line">One file. <em>Many brokers.</em></span></h1>
-      <p class="bq-hero-sub">bunqueue is <strong>zero-infrastructure background work by default</strong>: priorities, retries, cron, a dead letter queue, a <a href="/guide/workflow/">durable workflow engine</a>, and a native <a href="/guide/mcp/">MCP server</a>. Use one process in memory or with one SQLite file, or opt into PostgreSQL 15–18 when several brokers must share one authoritative queue; 18.6 is recommended. No Redis required. The queue speaks to <a href="/guide/sdks/">six languages</a>; the workflow engine runs in-process on Bun.</p>
+<div class="bq-home not-content">
+  <HomeHero />
 
-      <div class="bq-hero-steps">
-        <div class="bq-hero-step">
-          <p class="bq-install-label">1 · Start the server <span style="font-weight: 400; opacity: 0.7;">(skip on Bun: it runs embedded)</span></p>
+  <section class="home-section" id="quickstart" aria-labelledby="start-title">
+    <div class="home-section-intro">
+      <h2 id="start-title">Your first job, end to end.</h2>
+      <p>Choose how to run the queue. Both options are free, with the same core queue features.</p>
+    </div>
 
-          <Tabs syncKey="server">
-            <TabItem label="Terminal">
-              <BootTerminal />
-            </TabItem>
-            <TabItem label="Docker">
+    <Tabs>
+      <TabItem label="Server + your language">
+        <div class="home-setup-grid">
+          <div class="home-server-step">
+            <h3><span class="home-step-number">1</span> Run your own server</h3>
+            <p>In a terminal with <a href="/guide/installation/">Bun installed</a>, start the included server. Keep it running.</p>
 
 ```bash
-docker run -d --name bunqueue \
-  -p 6789:6789 -p 6790:6790 \
-  -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:latest
+bunx bunqueue start --host 127.0.0.1 --data-path ./bunqueue.db
 ```
 
-            </TabItem>
-            <TabItem label="PostgreSQL · 2 brokers">
+            <dl class="home-connection">
+              <div><dt>Client connection</dt><dd>127.0.0.1:6789 <span>TCP</span></dd></div>
+              <div><dt>HTTP API</dt><dd>127.0.0.1:6790 <span>HTTP</span></dd></div>
+              <div><dt>Storage</dt><dd>./bunqueue.db <span>SQLite</span></dd></div>
+            </dl>
+            <p class="home-note">This is a local process on your machine. The server is included in the MIT-licensed package.</p>
+            <a class="home-text-link" href="/guide/server/">Docker &amp; deployment options <span aria-hidden="true">↗</span></a>
+          </div>
 
-```bash
-git clone --depth 1 https://github.com/egeominotti/bunqueue.git
-cd bunqueue
-POSTGRES_PASSWORD='replace-me' \
-  BUNQUEUE_POSTGRES_URL='postgres://bunqueue:replace-me@postgres:5432/bunqueue' \
-  docker compose -f docker-compose.postgres.yml up --build -d
-```
+          <div class="home-client-step">
+            <h3><span class="home-step-number">2</span> Connect your app and worker</h3>
+            <p>Open another terminal. Install a client, save the example, then run it.</p>
 
-            </TabItem>
-          </Tabs>
-        </div>
-        <div class="bq-hero-step">
-          <p class="bq-install-label">2 · Install the client, in your language</p>
-
-          <Tabs syncKey="runtime">
-        <TabItem label="Bun">
-
-```bash
-bun add bunqueue   # embedded: queue + worker in your process
-```
-
-        </TabItem>
-        <TabItem label="Node.js / Deno">
+            <Tabs>
+              <TabItem label="Node.js">
 
 ```bash
 npm install bunqueue-client
 ```
 
-        </TabItem>
-        <TabItem label="Workers">
+```javascript title="jobs.mjs"
+import { Queue, Worker } from 'bunqueue-client';
 
-```bash
-npm install bunqueue-client   # produce jobs from fetch handlers
+const connection = { host: '127.0.0.1', port: 6789 };
+const queue = new Queue('emails', connection);
+
+const worker = new Worker(
+  'emails',
+  async (job) => {
+    console.log('Processing:', job.data.to);
+    return { sent: true };
+  },
+  connection
+);
+
+worker.on('error', (error) => console.error(error));
+await queue.add('welcome', { to: 'hello@example.com' });
 ```
 
-        </TabItem>
-        <TabItem label="Python">
+```bash
+node jobs.mjs
+```
+
+              </TabItem>
+              <TabItem label="Deno">
+
+```bash
+deno add npm:bunqueue-client
+```
+
+```typescript title="jobs.ts"
+import { Queue, Worker } from 'bunqueue-client';
+
+const connection = { host: '127.0.0.1', port: 6789 };
+const queue = new Queue<{ to: string }>('emails', connection);
+
+const worker = new Worker<{ to: string }>(
+  'emails',
+  async (job) => {
+    console.log('Processing:', job.data.to);
+    return { sent: true };
+  },
+  connection
+);
+
+worker.on('error', (error) => console.error(error));
+await queue.add('welcome', { to: 'hello@example.com' });
+```
+
+```bash
+deno run --allow-net --allow-env --allow-sys=hostname jobs.ts
+```
+
+              </TabItem>
+              <TabItem label="Python">
 
 ```bash
 pip install bunqueue-client
 ```
 
-        </TabItem>
-        <TabItem label="PHP">
-
-```bash
-composer require bunqueue/client
-```
-
-        </TabItem>
-        <TabItem label="Go">
-
-```bash
-go get github.com/egeominotti/bunqueue/sdk/go
-```
-
-        </TabItem>
-        <TabItem label="Rust">
-
-```bash
-cargo add bunqueue-client
-```
-
-        </TabItem>
-        <TabItem label="Elixir">
-
-```elixir
-{:bunqueue_client, path: "../bunqueue/sdk/elixir"}  # Hex upcoming
-```
-
-        </TabItem>
-          </Tabs>
-        </div>
-      </div>
-
-      <div class="bq-actions">
-        <a class="bq-btn" href="#quickstart">Get started in 60s</a>
-        <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ <span class="bq-stars-slot">Star</span> on GitHub</a>
-      </div>
-      <p class="bq-hero-trust">MIT licensed · embedded or standalone · protocol-conformant Queue/Worker/Flow core across Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir and Cloudflare Workers</p>
-    </div>
-
-  </div>
-
-<div class="bq-sim" aria-hidden="true">
-  <div class="bq-sim-lanes">
-    <div class="bq-sim-col" id="bq-waiting">
-      <div class="bq-sim-head">
-        <span class="bq-dot" style="background: var(--bq-amber)"></span> waiting{' '}
-        <span class="bq-count">0</span>
-      </div>
-    </div>
-    <div class="bq-sim-col" id="bq-active">
-      <div class="bq-sim-head">
-        <span class="bq-dot" style="background: var(--bq-blue)"></span> active{' '}
-        <span class="bq-count">0</span>
-      </div>
-    </div>
-    <div class="bq-sim-col" id="bq-done">
-      <div class="bq-sim-head">
-        <span class="bq-dot" style="background: var(--bq-green)"></span> completed{' '}
-        <span class="bq-count">0</span>
-      </div>
-    </div>
-  </div>
-  <div class="bq-sim-dlq">
-    <span class="bq-sim-dlq-label">dlq</span>
-    <span id="bq-dlq-slot"></span>
-  </div>
-</div>
-<p class="bq-pipeline-caption">live simulation: higher priority jobs jump the line, failures retry with backoff, exhausted retries land in the dead letter queue</p>
-
-<script is:inline src="/bq-sim.js"></script>
-
-  <div class="bq-proof">
-    <span><b>186K</b> jobs/sec public on-disk addBulk, embedded</span>
-    <span><b>159K</b> jobs/sec PUSHB over TCP</span>
-    <span><b>PostgreSQL 15–18</b> multi-broker</span>
-    <span><b>1</b> runtime dependency</span>
-    <span><b>500+</b> e2e scenarios across 7 runtimes</span>
-    <span id="bq-npm-proof" hidden><b id="bq-npm-count"></b> npm downloads/week</span>
-  </div>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">capabilities</span>
-  <h2 class="bq-h2">Not just a queue.</h2>
-  <p class="bq-lede">A queue is where bunqueue starts, not where it stops. Use memory by default, configure one SQLite file for local persistence, or choose an authoritative PostgreSQL database for a broker fleet. The server also provides cron, flows, a dead letter queue, shared operations, and a native MCP server for AI agents. Every official client shares the protocol-conformant Queue/Worker/Flow core; language-specific capabilities are listed in the <a href="/guide/sdks/#query-control-and-operations">SDK matrix</a>. The workflow engine and its agent integrations are in-process Bun APIs.</p>
-
-  <div class="bq-tools">
-    <div class="bq-tool">
-      <BqIcon name="rows" />
-      <h3>Queue &amp; Worker</h3>
-      <p>BullMQ-familiar API for adding and processing jobs, end to end TypeScript.</p>
-      <pre class="bq-tool-cmd">{"await queue.add('welcome', data, { priority: 5 })"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/queue/">Priorities &amp; delays</a></li>
-        <li><a href="/guide/worker/">Retries with backoff</a></li>
-        <li><a href="/guide/queue/">Idempotent custom IDs</a></li>
-        <li><a href="/guide/rate-limiting/">Rate limits &amp; concurrency</a></li>
-        <li><a href="/guide/flow/">Flows: parent-child jobs</a></li>
-        <li><a href="/guide/stall-detection/">Stall detection</a></li>
-      </ul>
-    </div>
-    <div class="bq-tool">
-      <BqIcon name="clock" />
-      <h3>Cron &amp; schedulers</h3>
-      <p>Repeatable jobs with cron patterns, intervals and timezones, persisted across restarts when SQLite or PostgreSQL storage is configured.</p>
-      <pre class="bq-tool-cmd">{"await app.cron('daily', '0 9 * * *', data)"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/cron/">Cron patterns</a></li>
-        <li><a href="/guide/cron/">Every-N intervals</a></li>
-        <li><a href="/guide/cron/">Timezones</a></li>
-        <li><a href="/guide/cron/">Run limits</a></li>
-      </ul>
-    </div>
-    <div class="bq-tool">
-      <BqIcon name="branch" />
-      <h3>Workflow engine</h3>
-      <p>Multi-step orchestration with automatic rollback when a step fails. In-process, Bun only.</p>
-      <pre class="bq-tool-cmd">{"new Workflow('order').step(...).parallel(...)"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/workflow/rollback/">Saga compensation</a></li>
-        <li><a href="/guide/workflow/steps/">Branching &amp; parallel steps</a></li>
-        <li><a href="/guide/workflow/approval/">Human approval gates</a></li>
-        <li><a href="/guide/workflow/durability/">Crash recovery &amp; idempotency</a></li>
-      </ul>
-    </div>
-    <div class="bq-tool">
-      <BqIcon name="pulse" />
-      <h3>Operations</h3>
-      <p>Failed jobs are kept and retryable, metrics are scrapable, backups are scheduled.</p>
-      <pre class="bq-tool-cmd">{"bunx bunqueue-dashboard"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/dlq/">Dead letter queue</a></li>
-        <li><a href="/guide/monitoring/">Prometheus &amp; probes</a></li>
-        <li><a href="/guide/webhooks/">Webhooks, SSE, WebSocket</a></li>
-        <li><a href="/guide/backup/">S3 backups</a></li>
-      </ul>
-    </div>
-    <div class="bq-tool">
-      <BqIcon name="branch" />
-      <h3>AI agents</h3>
-      <p>A native MCP server, usable from any language, plus durable agent runs on Bun that survive a restart and roll back the tools a model called.</p>
-      <pre class="bq-tool-cmd">{"bunx --package=bunqueue bunqueue-mcp"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/mcp/">MCP server</a></li>
-        <li><a href="/guide/workflow/ai-agents/">Durable agent loops</a></li>
-        <li><a href="/guide/workflow/agent-sdks/">Claude, OpenAI, Mastra, LangGraph</a></li>
-        <li><a href="/guide/workflow/rollback/">Roll back a tool call</a></li>
-      </ul>
-    </div>
-    <div class="bq-tool">
-      <BqIcon name="rows" />
-      <h3>Polyglot &amp; edge</h3>
-      <p>One server, six official client languages, and a store-and-forward mode that drains edge jobs to a central instance.</p>
-      <pre class="bq-tool-cmd">{"queue.forward({ to: { host: 'central' } })"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/sdks/">TypeScript, Python, PHP, Go, Rust, Elixir</a></li>
-        <li><a href="/guide/iot-edge/">Store-and-forward at the edge</a></li>
-        <li><a href="/security/">TLS &amp; auth tokens</a></li>
-        <li><a href="/guide/cli/">CLI</a></li>
-      </ul>
-    </div>
-  </div>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">polyglot clients</span>
-  <h2 class="bq-h2">One queue, any language.</h2>
-  <p class="bq-lede">The server owns every queue semantic, so clients stay thin and identical in spirit: add a job in one language, process it in another, same options, same guarantees. Official SDKs for TypeScript, Python, PHP, Go, Rust and Elixir, built on a <a href="https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md">formal wire protocol</a>.</p>
-  <div class="bq-actions" style="margin-top: 1.4rem;">
-    <button type="button" class="bq-hero-install" aria-label="Copy install command">npm install bunqueue-client</button>
-    <a class="bq-btn-ghost" href="/guide/sdks/">SDK guide</a>
-    <a class="bq-btn-ghost" href="https://www.npmjs.com/package/bunqueue-client">npm</a>
-  </div>
-
-  <div class="bq-langs">
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: var(--bq-blue)"></span> TypeScript · Node, Deno, Bun</h3>
-
-```typescript
-import { Queue, Worker } from 'bunqueue-client';
-
-const queue = new Queue('emails');
-await queue.add('welcome', { to: 'a@b.co' });
-
-new Worker(
-  'emails',
-  async (job) => {
-    await sendEmail(job.data);
-    return { sent: true };
-  },
-  { concurrency: 10 }
-);
-```
-
-      <p><a href="https://www.npmjs.com/package/bunqueue-client">npm install bunqueue-client</a> · Node, Deno, Bun and Workers</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: var(--bq-green)"></span> Python</h3>
-
-```python
+```python title="jobs.py"
 from bunqueue import Queue, Worker
 
-queue = Queue("emails")
-queue.add("welcome",
-    {"to": "a@b.co"}, attempts=3)
+connection = {"host": "127.0.0.1", "port": 6789}
+queue = Queue("emails", **connection)
+queue.add("welcome", {"to": "hello@example.com"})
+queue.close()
 
 def process(job):
-    send_email(job.data["to"])
+    print("Processing:", job.data["to"])
     return {"sent": True}
 
-Worker("emails", process,
-    concurrency=10).run()
+Worker("emails", process, **connection).run()
 ```
-
-      <p><a href="/guide/sdks/">familiar API, snake_case</a> · sync producer, threaded workers</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: #777bb3"></span> PHP</h3>
-
-```php
-use Bunqueue\Queue;
-use Bunqueue\Worker;
-
-$queue = new Queue('emails');
-$queue->add('welcome',
-    ['to' => 'a@b.co'],
-    ['attempts' => 3]);
-
-$worker = new Worker('emails',
-    fn ($j) => sendEmail($j->data()));
-$worker->run(); // or runOnce()
-```
-
-      <p><a href="/guide/sdks/">FPM-friendly producer, CLI worker</a> · runOnce() for cron ticks</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: #00add8"></span> Go</h3>
-
-```go
-queue := bunqueue.NewQueue("emails",
-    bunqueue.Options{})
-queue.Add("welcome",
-    map[string]any{"to": "a@b.co"}, nil)
-
-worker := bunqueue.NewWorker("emails",
-  func(job *bunqueue.Job) (any, error) {
-    return sendEmail(job.Data())
-  }, bunqueue.WorkerOptions{
-    Concurrency: 8,
-  })
-worker.Run()
-```
-
-      <p><a href="/guide/sdks/">goroutine worker pool</a> · one dependency, go get and go</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: #ce422b"></span> Rust</h3>
-
-```rust
-use bunqueue_client::{Queue, Worker,
-    ConnectionOptions, WorkerOptions,
-    JobOptions};
-
-let queue = Queue::new("emails",
-    ConnectionOptions::default());
-queue.add("welcome", data,
-    JobOptions::default())?;
-
-let worker = Worker::new("emails",
-    |job| process(job.data()),
-    WorkerOptions::default());
-worker.run()?;
-```
-
-      <p><a href="/guide/sdks/">typed options, no insecure TLS mode</a> · <a href="https://docs.rs/bunqueue-client/latest/bunqueue_client/">API docs</a></p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: #6e4a7e"></span> Elixir</h3>
-
-```elixir
-queue = Bunqueue.queue("emails")
-{:ok, _job} = Bunqueue.Queue.add(queue,
-  "welcome", %{to: "a@b.co"})
-
-worker =
-  Bunqueue.Worker.new("emails", fn job ->
-    send_email(job.data)
-    {:ok, %{sent: true}}
-  end, concurrency: 8)
-
-Bunqueue.Worker.run(worker)
-```
-
-      <p><a href="/guide/sdks/">tagged tuples, OTP-friendly</a> · Hex upcoming</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: var(--bq-amber)"></span> Cloudflare Workers</h3>
-
-```typescript
-import { Queue } from 'bunqueue-client';
-
-export default {
-  async fetch(req: Request, env: Env) {
-    const q = new Queue('signups', { host: env.HOST, tls: true });
-    const job = await q.add('welcome', await req.json());
-    q.close();
-    return Response.json({ queued: job.id });
-  },
-};
-```
-
-      <p><a href="/guide/sdks/">nodejs_compat flag, produce from fetch handlers</a> · consume via Cron Triggers</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: var(--bq-red)"></span> CLI &amp; AI agents</h3>
 
 ```bash
-# push, watch, inspect from the terminal
-bunqueue push emails '{"to":"a@b.co"}'
-bunqueue stats
-bunqueue dlq list emails
-
-# or let an agent drive it: 73 MCP tools
-claude mcp add bunqueue \
-  -- bunx --package=bunqueue bunqueue-mcp
+python jobs.py
 ```
 
-      <p><a href="/guide/mcp/">MCP server</a> for Claude, Cursor and any MCP client</p>
-    </div>
+              </TabItem>
+            </Tabs>
+            <p class="home-note">You should see <code>{'Processing: hello@example.com'}</code>. Your application and worker use the same queue name and TCP address.</p>
+            <a class="home-text-link" href="/guide/sdks/">PHP, Go, Rust, Elixir &amp; all SDK guides <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+        <aside class="home-callout">
+          <strong>Connecting to another machine?</strong>
+          <p>Use your server's hostname in both clients. Port <code>6789</code> is for TCP clients; <code>6790</code> is for HTTP. Follow the <a href="/guide/server/">deployment guide</a> for network binding, TLS and authentication.</p>
+        </aside>
+      </TabItem>
 
-  </div>
-</div>
+      <TabItem label="Embedded in Bun">
+        <div class="home-setup-grid">
+          <div class="home-server-step">
+            <h3>Run everything in your Bun process</h3>
+            <p>Use embedded mode when your app and worker run together on Bun. The queue engine lives inside your application.</p>
 
-<div class="bq-wrap bq-section" id="quickstart">
-  <span class="bq-eyebrow">quickstart</span>
-  <h2 class="bq-h2">Write ten lines. Run.</h2>
-  <p class="bq-lede">The same ten lines in every language: a queue, a worker, a job. On Bun it all runs embedded in your process; from any other language the code talks to the server you started with one command.</p>
+```bash
+bun add bunqueue
+```
 
-  <div class="bq-steps">
-    <div class="bq-step">
-      <div class="bq-step-head"><span class="bq-step-num">1</span><h3>Write a queue and a worker</h3></div>
+            <dl class="home-connection">
+              <div><dt>Runtime</dt><dd>Bun</dd></div>
+              <div><dt>Separate server</dt><dd>Not needed</dd></div>
+              <div><dt>Connection address</dt><dd>Not needed</dd></div>
+            </dl>
+            <p class="home-note">Set <code>embedded: true</code> on both the queue and worker. The example keeps jobs in memory; configure <a href="/guide/databases/">SQLite persistence</a> to recover work after a restart.</p>
+          </div>
+          <div class="home-client-step">
+            <h3>Add a job and process it</h3>
 
-      <Tabs syncKey="lang">
-        <TabItem label="Bun">
-
-```typescript
+```typescript title="jobs.ts"
 import { Queue, Worker } from 'bunqueue/client';
 
-const queue = new Queue('emails', { embedded: true });
+const queue = new Queue<{ to: string }>('emails', { embedded: true });
 
-new Worker(
+const worker = new Worker<{ to: string }>(
   'emails',
   async (job) => {
-    console.log(`to ${job.data.to}`);
+    console.log('Processing:', job.data.to);
     return { sent: true };
   },
   { embedded: true }
 );
 
-await queue.add('welcome', { to: 'a@b.co' }, { attempts: 3 });
+worker.on('error', (error) => console.error(error));
+await queue.add('welcome', { to: 'hello@example.com' });
 ```
-
-        </TabItem>
-        <TabItem label="Node.js / Deno">
-
-```typescript
-import { Queue, Worker } from 'bunqueue-client';
-
-const queue = new Queue('emails');
-
-new Worker('emails', async (job) => {
-  console.log(`to ${job.data.to}`);
-  return { sent: true };
-});
-
-await queue.add('welcome', { to: 'a@b.co' }, { attempts: 3 });
-```
-
-        </TabItem>
-        <TabItem label="Python">
-
-```python
-from bunqueue import Queue, Worker
-
-queue = Queue("emails")
-queue.add("welcome",
-    {"to": "a@b.co"}, attempts=3)
-
-def process(job):
-    print(f"to {job.data['to']}")
-    return {"sent": True}
-
-Worker("emails", process,
-    concurrency=10).run()
-```
-
-        </TabItem>
-        <TabItem label="PHP">
-
-```php
-use Bunqueue\Queue;
-use Bunqueue\Worker;
-
-$queue = new Queue('emails');
-$queue->add('welcome',
-    ['to' => 'a@b.co'],
-    ['attempts' => 3]);
-
-$worker = new Worker('emails',
-    function (Bunqueue\Job $job) {
-        return ['sent' => true];
-    });
-$worker->run();
-```
-
-        </TabItem>
-        <TabItem label="Go">
-
-```go
-queue := bunqueue.NewQueue("emails",
-    bunqueue.Options{})
-queue.Add("welcome",
-    map[string]any{"to": "a@b.co"},
-    bunqueue.JobOptions{"attempts": 3})
-
-worker := bunqueue.NewWorker("emails",
-  func(job *bunqueue.Job) (any, error) {
-    return map[string]any{"sent": true}, nil
-  }, bunqueue.WorkerOptions{Concurrency: 8})
-worker.Run()
-```
-
-        </TabItem>
-        <TabItem label="Rust">
-
-```rust
-use bunqueue_client::{ConnectionOptions,
-    JobOptions, Queue, Value, Worker,
-    WorkerOptions};
-
-let queue = Queue::new("emails",
-    ConnectionOptions::default());
-queue.add("welcome", data,
-    JobOptions::default())?;
-
-let worker = Worker::new("emails",
-    |job| Ok(Value::from(true)),
-    WorkerOptions::default());
-worker.run()?;
-```
-
-        </TabItem>
-        <TabItem label="Elixir">
-
-```elixir
-queue = Bunqueue.queue("emails")
-
-{:ok, _job} =
-  Bunqueue.Queue.add(queue, "welcome",
-    %{to: "a@b.co"})
-
-worker =
-  Bunqueue.Worker.new("emails", fn job ->
-    {:ok, %{sent: true}}
-  end, concurrency: 8)
-
-Bunqueue.Worker.run(worker)
-```
-
-        </TabItem>
-      </Tabs>
-
-    </div>
-    <div class="bq-step">
-      <div class="bq-step-head"><span class="bq-step-num">2</span><h3>Run</h3></div>
-
-      <Tabs syncKey="lang">
-        <TabItem label="Bun">
 
 ```bash
-bun app.ts        # no server: embedded
-# to a@b.co
+bun jobs.ts
 ```
 
-        </TabItem>
-        <TabItem label="Node.js / Deno">
+            <a class="home-text-link" href="/guide/quickstart/">Read the full quickstart <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+      </TabItem>
+    </Tabs>
 
-```bash
-bunx bunqueue start                      # server, once
-node --experimental-strip-types app.ts   # Node 22+; or: deno run -A app.ts
-```
+  </section>
 
-        </TabItem>
-        <TabItem label="Python">
-
-```bash
-bunx bunqueue start   # server, once
-python app.py
-```
-
-        </TabItem>
-        <TabItem label="PHP">
-
-```bash
-bunx bunqueue start   # server, once
-php worker.php
-```
-
-        </TabItem>
-        <TabItem label="Go">
-
-```bash
-bunx bunqueue start   # server, once
-go run .
-```
-
-        </TabItem>
-        <TabItem label="Rust">
-
-```bash
-bunx bunqueue start   # server, once
-cargo run
-```
-
-        </TabItem>
-        <TabItem label="Elixir">
-
-```bash
-bunx bunqueue start   # server, once
-mix run app.exs
-```
-
-        </TabItem>
-      </Tabs>
-
-      <p class="bq-step-note">That's the whole setup, in any of the six languages. Retries, priorities, cron, rate limits and the dead letter queue are options on <code>add()</code>. Use <code>--data-path</code> for a single SQLite-backed server, or <code>BUNQUEUE_POSTGRES_URL</code> when several servers must share one queue. <a href="/guide/quickstart/">Full quickstart</a> · <a href="/guide/databases/">Storage guide</a> · <a href="/guide/sdks/">SDK guide</a></p>
-    </div>
-
-  </div>
+  <HomeDetails />
 </div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">vs bullmq</span>
-  <h2 class="bq-h2">Same job, three fewer boxes.</h2>
-  <p class="bq-lede">BullMQ is excellent software that requires Redis. bunqueue removes that requirement: run the queue in your process and persist it to one SQLite file, or reuse PostgreSQL when you need several active brokers. Coming from Celery, Sidekiq or asynq instead? The public queue contract stays familiar while Redis remains optional infrastructure you do not need.</p>
-
-<div class="bq-vs">
-  <div class="bq-vs-card">
-    <h3>Running BullMQ</h3>
-    <div class="bq-stack">
-      <div class="bq-box">
-        your app <i>bullmq client</i>
-      </div>
-      <div class="bq-box">
-        redis server <i>provision · secure · monitor</i>
-      </div>
-      <div class="bq-box">
-        redis persistence <i>AOF / RDB tuning</i>
-      </div>
-      <div class="bq-box">
-        redis upgrades <i>versions · memory limits</i>
-      </div>
-    </div>
-    <p class="bq-vs-sum">4 moving parts<small>one of them stateful, on call</small></p>
-  </div>
-  <div class="bq-vs-card">
-    <h3>Running bunqueue</h3>
-    <div class="bq-stack">
-      <div class="bq-box">
-        your app <i>bunqueue / bunqueue-client</i>
-      </div>
-      <div class="bq-box bq-box-hero">
-        <b>bunq.db</b> <i>the entire queue</i>
-      </div>
-    </div>
-    <p class="bq-vs-sum">1 file<small>cp to back up, sqlite3 to inspect</small></p>
-  </div>
-</div>
-
-<div class="bq-bench-card" style="margin-top: 2.4rem;">
-  <p class="bq-bench-title">Pushing 100-job batches over TCP</p>
-  <p class="bq-bench-sub">throughput in ops/sec vs BullMQ + Redis, identical workloads</p>
-  <div class="bq-bar-row">
-    <div class="bq-bar-label">
-      <span>bunqueue · 85,700 ops/s</span>
-      <b>3.5x</b>
-    </div>
-    <div class="bq-bar" style="width: 100%"></div>
-  </div>
-  <div class="bq-bar-row">
-    <div class="bq-bar-label">
-      <span>BullMQ + Redis · 24,800 ops/s</span>
-    </div>
-    <div class="bq-bar bq-bar-them" style="width: 29%"></div>
-  </div>
-  <p class="bq-bench-title" style="margin-top: 1.6rem;">p99 push latency, lower is better</p>
-  <div class="bq-bar-row">
-    <div class="bq-bar-label">
-      <span>bunqueue · 6.3 ms</span>
-      <b>1.8x lower</b>
-    </div>
-    <div class="bq-bar" style="width: 57%"></div>
-  </div>
-  <div class="bq-bar-row">
-    <div class="bq-bar-label">
-      <span>BullMQ + Redis · 11.1 ms</span>
-    </div>
-    <div class="bq-bar bq-bar-them" style="width: 100%"></div>
-  </div>
-  <p class="bq-bench-foot">Apple M1 Max · Bun 1.3.14 · BullMQ 5.79.3 · Redis 8.8.0 ·{' '} <a href="https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts"> methodology </a>{' '} · <a href="/guide/benchmarks/">all benchmarks →</a></p>
-</div>
-
-  <div class="bq-actions" style="margin-top: 2rem;">
-    <a class="bq-btn" href="/guide/migration/">Migrate from BullMQ in minutes</a>
-    <a class="bq-btn-ghost" href="/guide/comparison/">Full comparison</a>
-    <a class="bq-btn-ghost" href="/guide/benchmarks/">Benchmarks</a>
-  </div>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">trade-offs</span>
-  <h2 class="bq-h2">Where bunqueue stops.</h2>
-  <p class="bq-lede">SQLite keeps the smallest topology; PostgreSQL 15–18 adds a multi-broker topology, with 18.6 recommended. Each has a clear operational boundary. Read this before you adopt.</p>
-
-  <div class="bq-trust">
-    <div class="bq-trust-card">
-      <span class="bq-tag">availability</span>
-      <h3>Storage owns availability</h3>
-      <p>SQLite is one broker with snapshot restore. PostgreSQL mode supports several brokers, while database HA, routing and PITR remain yours to operate. Neither mode is a multi-region consensus layer. <a href="/guide/databases/">See the storage contract</a>.</p>
-    </div>
-    <div class="bq-trust-card">
-      <span class="bq-tag">durability</span>
-      <h3>SQLite lets you choose</h3>
-      <p>SQLite batches non-durable writes for up to 10ms; a process crash inside that window can lose them. Jobs that cannot tolerate bunqueue's buffer take <code>{"{ durable: true }"}</code> and commit before <code>add()</code> returns. PostgreSQL admissions are transactional and do not use this buffer; machine/power-loss durability remains a storage-operator concern.</p>
-    </div>
-    <div class="bq-trust-card">
-      <span class="bq-tag">scaling</span>
-      <h3>Workers and brokers can scale</h3>
-      <p>Any number of workers connect over TCP. The SQLite server stays single; PostgreSQL 15–18 coordinates multiple broker processes through transactional claims and fenced leases. Edge queues can still drain with <a href="/guide/iot-edge/">forward()</a>.</p>
-    </div>
-  </div>
-</div>
-
-<div class="bq-wrap bq-section bq-dash">
-  <span class="bq-eyebrow">dashboard · beta</span>
-  <h2 class="bq-h2">See the queue move.</h2>
-  <p class="bq-lede">A web dashboard that fully drives your server: queues, jobs, DLQ, cron, webhooks, workers, live activity, a SQLite inspector and an AI copilot. One command:{' '} <code>bunx bunqueue-dashboard</code>.</p>
-  <video
-    src="https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116"
-    controls
-    autoplay
-    loop
-    muted
-    playsinline
-  ></video>
-  <div class="bq-actions" style="margin-top: 1.2rem;">
-    <a class="bq-btn" href="https://egeominotti.github.io/bunqueue-dashboard/">
-      Open the live demo
-    </a>
-    <button type="button" class="bq-hero-install" aria-label="Copy install command">
-      bunx bunqueue-dashboard
-    </button>
-  </div>
-  <p class="bq-dash-links"><a href="https://egeominotti.github.io/bunqueue-dashboard/docs/user-guide">user guide</a> ·{' '} <a href="https://github.com/egeominotti/bunqueue-dashboard">github</a> ·{' '} <a href="https://www.npmjs.com/package/bunqueue-dashboard">npm</a></p>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">persistence</span>
-  <h2 class="bq-h2">Start in one file. Scale into shared SQL.</h2>
-  <p class="bq-lede">Choose the operational boundary that fits today. Storage selection changes the deployment topology, not the client API or job lifecycle.</p>
-  <div class="bq-trust">
-    <div class="bq-trust-card">
-      <span class="bq-tag">default</span>
-      <h3>SQLite · one broker</h3>
-      <p>Point <code>dataPath</code> at <code>bunq.db</code>. Jobs, schedules, results and the DLQ live in one inspectable file, with no external service and built-in S3 snapshots.</p>
-    </div>
-    <div class="bq-trust-card">
-      <span class="bq-tag">multi-broker</span>
-      <h3>PostgreSQL 15–18</h3>
-      <p>Several standalone servers share transactional claims, fenced leases, durable events, limits, cron, workers, job-state/lifecycle metrics, flows and DLQ state. PostgreSQL 18.6 is recommended.</p>
-    </div>
-    <div class="bq-trust-card">
-      <span class="bq-tag">native Bun</span>
-      <h3>No ORM. No Redis.</h3>
-      <p>The PostgreSQL path uses Bun's built-in <code>SQL</code> pool and prepared tagged templates directly. SQLite keeps its synchronous <code>bun:sqlite</code> hot path.</p>
-    </div>
-  </div>
-  <div class="bq-actions" style="margin-top: 1.4rem;">
-    <a class="bq-btn" href="/guide/databases/">
-      Choose a storage mode
-    </a>
-    <a
-      class="bq-btn-ghost"
-      href="https://github.com/egeominotti/bunqueue/blob/main/docker-compose.postgres.yml"
-    >
-      Run the two-broker topology
-    </a>
-  </div>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">developer experience</span>
-  <h2 class="bq-h2">A queue and a worker, ten lines.</h2>
-  <p class="bq-lede">The same familiar Queue and Worker API in six languages, and 3.5x the bulk push throughput of BullMQ measured on identical workloads, methodology below. Migrating takes minutes, the mental model is the same.</p>
-
-  <Tabs syncKey="lang">
-    <TabItem label="Bun">
-
-```typescript
-import { Queue, Worker } from 'bunqueue/client';
-
-const queue = new Queue('emails', { embedded: true });
-
-await queue.add('welcome', { to: 'a@b.co' }, { attempts: 3 });
-
-const worker = new Worker(
-  'emails',
-  async (job) => {
-    await sendEmail(job.data);
-    return { sent: true };
-  },
-  { embedded: true, concurrency: 5 }
-);
-
-worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
-```
-
-    </TabItem>
-    <TabItem label="Node.js / Deno">
-
-```typescript
-import { Queue, Worker } from 'bunqueue-client';
-
-const queue = new Queue('emails');
-
-await queue.add('welcome', { to: 'a@b.co' }, { attempts: 3 });
-
-const worker = new Worker(
-  'emails',
-  async (job) => {
-    await sendEmail(job.data);
-    return { sent: true };
-  },
-  { concurrency: 5 }
-);
-
-worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
-```
-
-    </TabItem>
-    <TabItem label="Python">
-
-```python
-from bunqueue import Queue, Worker
-
-queue = Queue("emails")
-queue.add("welcome", {"to": "a@b.co"}, attempts=3)
-
-def process(job):
-    send_email(job.data)
-    return {"sent": True}
-
-worker = Worker("emails", process, concurrency=5)
-worker.on("completed", lambda job, result: print(f"done: {job.id}"))
-worker.run()
-```
-
-    </TabItem>
-    <TabItem label="PHP">
-
-```php
-use Bunqueue\Queue;
-use Bunqueue\Worker;
-
-$queue = new Queue('emails');
-$queue->add('welcome', ['to' => 'a@b.co'], ['attempts' => 3]);
-
-$worker = new Worker('emails', function (Bunqueue\Job $job) {
-    sendEmail($job->data());
-    return ['sent' => true];
-});
-$worker->on('completed', fn ($job, $r) => print("done: {$job->id()}\n"));
-$worker->run();
-```
-
-    </TabItem>
-    <TabItem label="Go">
-
-```go
-queue := bunqueue.NewQueue("emails", bunqueue.Options{})
-queue.Add("welcome", map[string]any{"to": "a@b.co"},
-    bunqueue.JobOptions{"attempts": 3})
-
-worker := bunqueue.NewWorker("emails",
-    func(job *bunqueue.Job) (any, error) {
-        return sendEmail(job.Data())
-    }, bunqueue.WorkerOptions{Concurrency: 5})
-
-worker.On("completed", func(args ...any) {
-    job := args[0].(*bunqueue.Job)
-    log.Printf("done: %s", job.ID())
-})
-worker.Run()
-```
-
-    </TabItem>
-    <TabItem label="Rust">
-
-```rust
-use bunqueue_client::{ConnectionOptions, JobOptions,
-    ProcessError, Queue, Value, Worker, WorkerOptions};
-
-let queue = Queue::new("emails", ConnectionOptions::default());
-queue.add("welcome", data, JobOptions::default())?;
-
-let worker = Worker::new(
-    "emails",
-    |job| {
-        deliver(job.data())
-            .map(|_| Value::from(true))
-            .map_err(|e| ProcessError::retryable(e.to_string()))
-    },
-    WorkerOptions::default(),
-);
-worker.run()?;
-```
-
-    </TabItem>
-    <TabItem label="Elixir">
-
-```elixir
-queue = Bunqueue.queue("emails")
-
-{:ok, _job} =
-  Bunqueue.Queue.add(queue, "welcome", %{to: "a@b.co"})
-
-worker =
-  Bunqueue.Worker.new("emails", fn job ->
-    send_email(job.data)
-    {:ok, %{sent: true}}
-  end, concurrency: 5)
-
-Bunqueue.Worker.run(worker)
-```
-
-    </TabItem>
-
-  </Tabs>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">trust</span>
-  <h2 class="bq-h2">Verified, secured, observable.</h2>
-  <div class="bq-trust">
-    <div class="bq-trust-card">
-      <span class="bq-tag">quality</span>
-      <BqIcon name="check" />
-      <h3>Tested on every runtime</h3>
-      <ul>
-        <li>110 e2e scenarios each on Node.js, Deno, Bun</li>
-        <li>16 scenarios inside workerd</li>
-        <li>100 in Python · 33 in PHP · 32 in Go</li>
-        <li>every public SDK method covered</li>
-      </ul>
-    </div>
-    <div class="bq-trust-card">
-      <span class="bq-tag">security</span>
-      <BqIcon name="shield" />
-      <h3>Hardened by default</h3>
-      <ul>
-        <li>token auth across TCP and HTTP</li>
-        <li>native TLS or Unix domain sockets</li>
-        <li>webhook SSRF validation built in</li>
-        <li>
-          <a href="/security/">security model &amp; hardening guide</a>
-        </li>
-      </ul>
-    </div>
-    <div class="bq-trust-card">
-      <span class="bq-tag">operations</span>
-      <BqIcon name="pulse" />
-      <h3>Observable in production</h3>
-      <ul>
-        <li>Prometheus metrics endpoint</li>
-        <li>health and readiness probes</li>
-        <li>webhooks, SSE and WebSocket events</li>
-        <li>S3 backups for disaster recovery</li>
-      </ul>
-    </div>
-  </div>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">sqlite, seriously?</span>
-  <h2 class="bq-h2">The questions everyone asks.</h2>
-
-  <div class="bq-trust">
-    <div class="bq-trust-card">
-      <h3>Can SQLite handle a production queue?</h3>
-      <p>In WAL mode, yes: reads and writes overlap and persistence is batched. A native repeated-process campaign measured 186K jobs/sec public on-disk Embedded addBulk and 159K TCP PUSHB; the separate 729K result is an internal in-memory batch path. <a href="/guide/benchmarks/">Numbers, distributions and methodology here</a>.</p>
-    </div>
-    <div class="bq-trust-card">
-      <h3>What happens on a crash?</h3>
-      <p>With SQLite or PostgreSQL persistence configured, a restart recovers waiting, delayed and active work that was durably admitted. A worker that dies mid-job is caught by stall detection; PostgreSQL mode additionally fences the old lease before another broker recovers it. Repeated failures land in the retryable dead letter queue.</p>
-    </div>
-    <div class="bq-trust-card">
-      <h3>Can I run multiple brokers?</h3>
-      <p>Yes, with PostgreSQL 15–18. Independent servers claim jobs with <code>FOR UPDATE SKIP LOCKED</code>, coordinate through database-clock leases and replay missed notifications from a durable event journal. Do not point multiple processes at one SQLite file.</p>
-    </div>
-  </div>
-  <p class="bq-dash-links" style="margin-top: 1.4rem;">More answers in the <a href="/faq/">FAQ</a>: deduplication, ordering, backups, memory, Postgres.</p>
-</div>
-
-<div class="bq-wrap bq-cta">
-  <h2 class="bq-h2">Start in under a minute.</h2>
-  <p class="bq-lede" style="margin: 0 auto;">One install, ten lines, zero infrastructure. On the runtime you already use.</p>
-  <div class="bq-actions">
-    <button type="button" class="bq-hero-install" aria-label="Copy install command">
-      bun add bunqueue
-    </button>
-    <a class="bq-btn" href="/guide/quickstart/">
-      Read the quickstart
-    </a>
-    <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">
-      ★ <span class="bq-stars-slot">Star</span> on GitHub
-    </a>
-  </div>
-  <p class="bq-hero-trust">If bunqueue removes a Redis box from your stack, a star on GitHub helps other teams find it.</p>
-  <p class="bq-hero-trust"><a href="/blog/">Blog</a> · <a href="/simulator/">Simulator</a> ·{' '} <a href="/guide/comparison/">vs BullMQ</a> · <a href="/faq/">FAQ</a> ·{' '} <a href="/guide/introduction/">Docs</a></p>
-</div>
-
-<script is:inline src="/bq-copy.js"></script>

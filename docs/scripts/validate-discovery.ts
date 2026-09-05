@@ -2,6 +2,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rawCodeSpecifiers } from '../src/lib/llms-full';
+import { readSeoHead, referencePages } from '../src/lib/reference-seo';
+import apiVersions from '../src/data/apiVersions.json';
 
 const DOCS_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CONTENT_ROOT = join(DOCS_ROOT, 'src/content/docs');
@@ -52,6 +54,12 @@ function compareSets(label: string, actual: string[], expected: string[]): void 
 const contentFiles = (await walk(CONTENT_ROOT)).filter((file) => /\.mdx?$/.test(file));
 const pages = contentFiles.map((file) => ({ file, id: contentId(file) }));
 const indexableUrls = pages.filter(({ id }) => id !== '404').map(({ id }) => canonicalUrl(id));
+const currentReference = referencePages(
+  join(DOCS_ROOT, 'public/reference'),
+  apiVersions.current,
+  SITE
+);
+indexableUrls.push(...currentReference.map(({ url }) => url));
 const llmsUrlsExpected = pages
   .filter(({ id }) => id !== '404' && id !== 'blog' && !id.startsWith('blog/'))
   .map(({ id }) => canonicalUrl(id));
@@ -109,6 +117,59 @@ for (const url of new Set(curatedInternalUrls)) {
 }
 if (!curated.includes(`[PostgreSQL Multi-Broker Example](${multiBrokerUrls[0]})`)) {
   failures.push('llms.txt does not link the PostgreSQL multi-broker example hub');
+}
+
+const referenceTitles = new Set<string>();
+const referenceDescriptions = new Set<string>();
+for (const url of indexableUrls) {
+  const route = new URL(url).pathname.slice(1);
+  const file = join(DIST_ROOT, route.endsWith('/') || route === '' ? `${route}index.html` : route);
+  const head = readSeoHead(await readFile(file, 'utf8'));
+  if (head.canonicals.length !== 1 || head.canonicals[0] !== url) {
+    failures.push(`${url} does not have exactly one matching canonical`);
+  }
+  if (head.noindex) failures.push(`Indexable sitemap page ${url} is noindex`);
+  if (head.titles.length !== 1 || !head.titles[0].trim()) {
+    failures.push(`${url} does not have exactly one nonempty title`);
+  }
+  if (head.descriptions.length !== 1 || !head.descriptions[0].trim()) {
+    failures.push(`${url} does not have exactly one nonempty description`);
+  }
+  if (route.startsWith(`reference/${apiVersions.current}/`)) {
+    const [title] = head.titles;
+    const [description] = head.descriptions;
+    if (referenceTitles.has(title)) failures.push(`Current reference repeats title ${title}`);
+    if (referenceDescriptions.has(description) || description === 'Documentation for bunqueue') {
+      failures.push(`Current reference has a generic or repeated description at ${url}`);
+    }
+    referenceTitles.add(title);
+    referenceDescriptions.add(description);
+  }
+}
+for (const entry of await readdir(join(DIST_ROOT, 'reference'), { withFileTypes: true })) {
+  if (!entry.isDirectory() || entry.name === apiVersions.current) continue;
+  for (const file of (await walk(join(DIST_ROOT, 'reference', entry.name))).filter((file) =>
+    file.endsWith('.html')
+  )) {
+    if (!readSeoHead(await readFile(file, 'utf8')).noindex) {
+      failures.push(
+        `Historical or development reference is indexable: ${asPosix(relative(DIST_ROOT, file))}`
+      );
+    }
+  }
+}
+const hosting = JSON.parse(await readFile(join(DOCS_ROOT, 'vercel.json'), 'utf8')) as {
+  headers: { source: string; headers: { key: string; value: string }[] }[];
+};
+for (const rule of hosting.headers) {
+  if (
+    rule.source !== '/(.*).md' &&
+    rule.headers.some(
+      ({ key, value }) =>
+        key.toLowerCase() === 'x-robots-tag' && /\b(?:noindex|none)\b/i.test(value)
+    )
+  )
+    failures.push(`Hosting noindex header may block indexable HTML: ${rule.source}`);
 }
 
 const sitemap = await readFile(join(DIST_ROOT, 'sitemap-0.xml'), 'utf8');

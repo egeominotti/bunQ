@@ -1,5 +1,8 @@
 ---
 import config from 'virtual:starlight/user-config';
+import '../styles/docs-navigation.css';
+import '../styles/docs-reading.css';
+import '../styles/docs-tables.css';
 
 import LanguageSelect from 'virtual:starlight/components/LanguageSelect';
 import Search from 'virtual:starlight/components/Search';
@@ -27,7 +30,7 @@ const { pathname } = Astro.url;
 	<div class="title-wrapper sl-flex">
 		<SiteTitle />
 	</div>
-	<div class="sl-flex print:hidden">
+	<div class="docs-search sl-flex print:hidden">
 		{shouldRenderSearch && <Search />}
 	</div>
 	<a class="header-cta header-cta-mobile md:sl-hidden" href="/guide/quickstart/">Get started</a>

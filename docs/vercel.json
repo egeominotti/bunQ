@@ -3,10 +3,6 @@
   "outputDirectory": "dist",
   "headers": [
     {
-      "source": "/reference/v:version/(.*)",
-      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, follow" }]
-    },
-    {
       "source": "/(.*).md",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
     }

@@ -33,6 +33,8 @@
 !docs/src/content/
 !docs/src/content/docs/
 !docs/src/content/docs/**
+!docs/src/lib/
+!docs/src/lib/reference-seo.ts
 !docs/vercel.json
 !.github/
 !.github/workflows/
@@ -53,6 +55,8 @@
 !sdk/typescript/tests/workers/
 !sdk/typescript/tests/workers/run.mjs
 !sdk/typescript/package.json
+!sdk/typescript/src/
+!sdk/typescript/src/**
 !sdk/python/
 !sdk/python/pyproject.toml
 !sdk/php/

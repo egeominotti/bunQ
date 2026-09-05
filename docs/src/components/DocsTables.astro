@@ -1,0 +1,55 @@
+<script>
+  // Keep table semantics intact while making wide references keyboard-scrollable.
+  // The unenhanced CSS still provides horizontal scrolling without JavaScript.
+  function enhanceTables() {
+    const regions: HTMLElement[] = [];
+    let heading = 'Documentation';
+    const content = document.querySelector('.sl-markdown-content');
+    if (!content) return;
+
+    for (const element of content.querySelectorAll('h1, h2, h3, table')) {
+      if (element.closest('.not-content')) continue;
+      if (element.tagName !== 'TABLE') {
+        heading = element.textContent?.trim() || heading;
+        continue;
+      }
+      if (element.parentElement?.classList.contains('docs-table-scroll')) continue;
+      const region = document.createElement('div');
+      region.className = 'docs-table-scroll';
+      region.dataset.tableLabel = `${heading}: scroll to see all table columns`;
+      element.before(region);
+      region.append(element);
+      regions.push(region);
+    }
+
+    const updateRegions = (targets: HTMLElement[]) => {
+      const states = targets.map((region) => ({
+        region, overflow: region.scrollWidth > region.clientWidth + 1,
+      }));
+      for (const { region, overflow } of states) {
+        region.toggleAttribute('data-overflow', overflow);
+        if (overflow) {
+          region.tabIndex = 0;
+          region.setAttribute('role', 'region');
+          region.setAttribute('aria-label', region.dataset.tableLabel ?? 'Scrollable table');
+        } else {
+          region.removeAttribute('tabindex');
+          region.removeAttribute('role');
+          region.removeAttribute('aria-label');
+        }
+      }
+    };
+
+    updateRegions(regions);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => updateRegions(regions));
+    for (const region of regions) {
+      observer.observe(region);
+      if (region.firstElementChild) observer.observe(region.firstElementChild);
+    }
+    document.addEventListener('astro:before-swap', () => observer.disconnect(), { once: true });
+  }
+
+  enhanceTables();
+  document.addEventListener('astro:page-load', enhanceTables);
+</script>

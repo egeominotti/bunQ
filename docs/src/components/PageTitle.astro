@@ -1,4 +1,5 @@
 ---
+import DocsContext from './DocsContext.astro';
 /**
  * Starlight renders the frontmatter title as the page <h1>. On the 81 pages
  * that open with a custom .bq-hero, custom.css hides the panel that contains
@@ -8,21 +9,23 @@
  * subtree that search engines discount anyway.
  *
  * So: keep the real <h1> on pages that actually display it, and downgrade it
- * to a plain <div> where the hero already owns the heading. The element and
- * its id stay in place either way, because the table of contents links its
- * first entry ("Overview") to #_top.
+ * to a plain <div> where the hero already owns the heading. MarkdownContent
+ * provides the visible #_top focus target for those pages so skip links and
+ * the table of contents never target this hidden panel.
  */
 // Starlight's PAGE_TITLE_ID, inlined: `constants.ts` is not in the package's
 // export map, and the value is a public contract (the TOC links to #_top).
 const PAGE_TITLE_ID = '_top';
 
-const { entry } = Astro.locals.starlightRoute;
-const heroOwnsTheHeading = (entry.body ?? '').includes('bq-hero');
+const { entry, id, hasSidebar } = Astro.locals.starlightRoute;
+const heroOwnsTheHeading = id === 'index' || id === '' || (entry.body ?? '').includes('bq-hero');
 ---
+
+{hasSidebar && !heroOwnsTheHeading && <DocsContext />}
 
 {
   heroOwnsTheHeading ? (
-    <div id={PAGE_TITLE_ID} class="sl-page-title">
+    <div class="sl-page-title">
       {entry.data.title}
     </div>
   ) : (

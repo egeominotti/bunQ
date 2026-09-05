@@ -1,0 +1,215 @@
+/* Reading rhythm shared by guides, references and the documentation shell. */
+.docs-content-start {
+  display: block;
+  scroll-margin-top: 100px;
+}
+
+:root[data-has-sidebar] .sl-markdown-content {
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+:root[data-has-sidebar] .sl-markdown-content > :is(p, ul, ol, blockquote) {
+  max-width: 76ch;
+}
+
+:root[data-has-sidebar] .sl-markdown-content :is(p, li) {
+  line-height: 1.75;
+}
+
+:root[data-has-sidebar] :is(.sl-page-title, .sl-markdown-content h1) {
+  font-family: var(--docs-display);
+  font-size: clamp(2rem, 3.1vw, 2.9rem);
+  line-height: 1.15;
+  letter-spacing: -0.045em;
+  font-weight: 650;
+  text-wrap: balance;
+}
+
+:root[data-has-sidebar] .sl-markdown-content h2 {
+  font-family: var(--docs-display);
+  font-size: 1.85rem;
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+  font-weight: 650;
+  text-wrap: balance;
+}
+
+:root[data-has-sidebar] .sl-markdown-content h3 {
+  font-family: var(--docs-display);
+  font-size: 1.3rem;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+:root[data-has-sidebar] .sl-markdown-content :is(h2, h3, h4) {
+  scroll-margin-top: 100px;
+}
+
+:root[data-has-sidebar] .bq-hero {
+  padding: 8px 0 28px;
+  margin: 0;
+}
+
+:root[data-has-sidebar] .bq-hero .bq-eyebrow {
+  font-family: var(--sl-font-system);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-size: 0.8rem;
+  color: var(--docs-muted);
+  margin-bottom: 12px;
+}
+
+:root[data-has-sidebar] .bq-hero .bq-hero-sub {
+  max-width: 72ch;
+  margin-top: 18px;
+  font-size: 1.05rem;
+  color: var(--docs-muted);
+  line-height: 1.7;
+}
+
+:root[data-has-sidebar] .bq-hero-h1 em {
+  font-style: normal;
+  color: var(--docs-accent);
+}
+
+:root[data-has-sidebar] .sl-markdown-content a:not([class]) {
+  color: var(--docs-accent);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+:root[data-has-sidebar] .expressive-code {
+  --ec-codeFontSize: 0.85rem;
+  --ec-codeLineHeight: 1.75;
+  --ec-brdRad: 8px;
+  --ec-frames-frameBoxShdCssVal: none;
+}
+
+:root[data-has-sidebar] .expressive-code pre {
+  box-shadow: none;
+}
+
+:root[data-has-sidebar] .expressive-code .copy button {
+  min-width: 36px;
+  min-height: 36px;
+}
+
+:root[data-has-sidebar] starlight-tabs [role='tablist'] {
+  border-color: var(--docs-line);
+}
+
+:root[data-has-sidebar] starlight-tabs .tablist-wrapper {
+  -webkit-mask-image: none;
+  mask-image: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--docs-muted) transparent;
+}
+
+:root[data-has-sidebar] starlight-tabs .tablist-wrapper::-webkit-scrollbar {
+  display: block;
+  height: 6px;
+}
+
+:root[data-has-sidebar] starlight-tabs [role='tab'] {
+  font-size: 0.87rem;
+  font-weight: 500;
+  padding: 12px 16px;
+  color: var(--docs-muted);
+  white-space: nowrap;
+}
+
+:root[data-has-sidebar] starlight-tabs [role='tab'][aria-selected='true'] {
+  color: var(--docs-accent);
+  border-color: var(--docs-accent);
+  font-weight: 600;
+}
+
+:root[data-has-sidebar] .starlight-aside {
+  border-radius: 8px;
+  box-shadow: none;
+  padding: 18px 20px;
+  font-size: 0.94rem;
+}
+
+:root[data-has-sidebar] .starlight-aside .starlight-aside__title {
+  font-size: 0.95rem;
+}
+
+:root[data-has-sidebar] .pagination-links {
+  gap: 16px;
+  margin-top: 40px;
+}
+
+:root[data-has-sidebar] .pagination-links a {
+  padding: 20px;
+  border: 1px solid var(--docs-line);
+  background: var(--docs-panel);
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+  box-shadow: none;
+}
+
+:root[data-has-sidebar] .pagination-links a:hover {
+  background: var(--docs-tint);
+  border-color: var(--docs-accent);
+  transform: none;
+}
+
+:root[data-has-sidebar] .pagination-links .link-title {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+:root[data-has-sidebar] .sl-link-button[data-variant='primary'] {
+  color: #21101a !important;
+  background: var(--docs-accent) !important;
+}
+
+:root[data-has-sidebar][data-theme='light'] .sl-link-button[data-variant='primary'] {
+  color: #fff !important;
+}
+
+@media (min-width: 50rem) {
+  :root[data-has-sidebar] main .content-panel {
+    padding-inline: clamp(24px, 3vw, 48px);
+  }
+}
+
+@media (max-width: 49.99rem) {
+  :root[data-has-sidebar] main .content-panel {
+    padding-inline: 20px !important;
+  }
+  :root[data-has-sidebar] .bq-hero .bq-hero-sub {
+    font-size: 1rem;
+  }
+  :root[data-has-sidebar] .sl-markdown-content h2 {
+    font-size: 1.55rem;
+  }
+  :root[data-has-sidebar] starlight-tabs [role='tab'] {
+    padding-inline: 12px;
+    min-height: 44px;
+  }
+  :root[data-has-sidebar] .expressive-code .copy button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .header-cta,
+  nav.sidebar a,
+  .pagination-links a,
+  .sl-link-button {
+    transition: none !important;
+    transform: none !important;
+  }
+  nav.sidebar .caret {
+    transition: none !important;
+  }
+}

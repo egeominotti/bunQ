@@ -151,9 +151,12 @@ Isolation](./testing.md), the _Performance Characteristics_ and _Reliability &
 Battle-Testing_ sections of [Architecture](./architecture.md), and the
 reproducible reports under `benchmarks/`.
 
-Documentation build tooling lives under `docs/scripts/`. The Open Graph
-generator keeps static cover definitions in `og-covers.ts` and rendering in
-`generate-og.ts`; see [Documentation Tooling](./features/documentation-tooling.md).
+Documentation tooling spans `docs/scripts/` and `docs/src/lib/`. The Open Graph
+generator separates cover definitions from rendering; `reference-seo.ts` adds
+current API canonicals and metadata, while `sitemap.ts` owns sitemap priorities.
+Shared documentation navigation, reading styles and homepage onboarding live in
+`docs/src/components/` and `docs/src/styles/`; see
+[Documentation Tooling](./features/documentation-tooling.md).
 
 The Queue query split (`operations/query.ts`, `queryStates.ts`, and
 `queryTcpPages.ts`) is documented in [Client SDK: Queue](./features/client-queue-sdk.md).

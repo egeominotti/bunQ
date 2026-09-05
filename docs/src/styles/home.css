@@ -1,0 +1,271 @@
+/* Homepage tokens and introductory layout. Existing documentation stays independent. */
+.bq-home {
+  --home-accent: #f472b6;
+  --home-accent-ink: #21101a;
+  --home-tint: #20151d;
+  --home-muted: #b4b4bd;
+  --home-surface: #121214;
+  --home-line: #303035;
+  --home-display: 'Bricolage Grotesque Variable', var(--sl-font-system);
+  max-width: 1280px;
+  margin-inline: auto;
+  padding-inline: 32px;
+  color: var(--sl-color-text);
+}
+
+:root[data-theme='light'] .bq-home {
+  --home-accent: #ba1c62;
+  --home-accent-ink: #fff;
+  --home-tint: #fdf2f8;
+  --home-muted: #5d5d68;
+  --home-surface: #fafafa;
+  --home-line: #e4e4e7;
+}
+
+.bq-home :where(h1, h2, h3, p, figure, dl, dd) {
+  margin: 0;
+}
+
+.bq-home :is(h1, h2, h3) {
+  font-family: var(--home-display);
+  font-weight: 650;
+  text-wrap: balance;
+  letter-spacing: -0.035em;
+}
+
+.bq-home h2 {
+  font-size: clamp(1.9rem, 3vw, 2.7rem);
+  line-height: 1.15;
+}
+
+.bq-home h3 {
+  font-size: 1.3rem;
+  line-height: 1.35;
+}
+
+.bq-home p {
+  color: var(--home-muted);
+}
+
+.bq-home a {
+  color: var(--home-accent);
+  text-underline-offset: 4px;
+}
+
+.bq-home :is(a, button, summary):focus-visible {
+  outline: 2px solid var(--home-accent);
+  outline-offset: 5px;
+}
+
+.bq-home .home-hero {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  align-items: center;
+  gap: 72px;
+  padding: 64px 0 56px;
+}
+
+.home-license {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-license span {
+  border-left: 1px solid var(--home-line);
+  padding-left: 12px;
+  color: var(--home-muted);
+  font-weight: 400;
+}
+
+.bq-home .home-hero h1 {
+  margin-top: 26px;
+  font-size: clamp(2.75rem, 4.5vw, 4.25rem);
+  line-height: 1.06;
+  letter-spacing: -0.055em;
+}
+
+.home-hero h1 em {
+  color: var(--home-accent);
+  font-style: normal;
+}
+
+.bq-home .home-hero-sub {
+  max-width: 440px;
+  margin-top: 24px;
+  font-size: 1.15rem;
+  line-height: 1.65;
+}
+
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.bq-home :is(.home-button, .home-button-secondary) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 13px 19px;
+  border: 1px solid var(--home-line);
+  border-radius: 8px;
+  font-size: 0.91rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.bq-home .home-button {
+  color: var(--home-accent-ink);
+  background: var(--home-accent);
+  border-color: var(--home-accent);
+}
+
+.bq-home .home-button-secondary {
+  color: var(--sl-color-text);
+}
+
+.bq-home :is(.home-button, .home-button-secondary):hover {
+  border-color: var(--home-accent);
+  text-decoration: underline;
+}
+
+.home-topology {
+  border: 1px solid var(--home-line);
+  border-radius: 12px;
+  padding: 26px;
+  background: var(--home-surface);
+  font-size: 0.86rem;
+}
+
+.home-diagram-label {
+  display: block;
+  margin-bottom: 14px;
+  font-weight: 600;
+}
+
+.home-language-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.bq-home .home-language-grid a {
+  padding: 7px 2px;
+  border: 1px solid var(--home-line);
+  border-radius: 8px;
+  color: var(--sl-color-text);
+  text-align: center;
+  text-decoration: none;
+  font-size: 0.81rem;
+}
+
+.home-language-grid a:hover {
+  background: var(--home-tint);
+  border-color: var(--home-accent);
+}
+
+.home-topology-wire {
+  display: grid;
+  grid-template-columns: 1fr 30px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0;
+  color: var(--home-muted);
+  font-size: 0.75rem;
+}
+
+.home-topology-wire > :first-child {
+  text-align: right;
+}
+
+.home-topology-wire > :nth-child(2) {
+  color: var(--home-accent);
+  font-size: 1.5rem;
+  text-align: center;
+}
+
+.home-topology-engine {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--home-accent);
+  border-radius: 8px;
+  padding: 18px 16px;
+  background: var(--home-tint);
+}
+
+.home-topology-engine img {
+  flex-shrink: 0;
+}
+
+.home-topology-engine strong {
+  font-family: var(--home-display);
+  font-size: 1.22rem;
+}
+
+.home-topology-engine div > span,
+.home-topology-worker span {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.75rem;
+  color: var(--home-muted);
+}
+
+.home-engine-license {
+  margin-left: auto;
+  color: var(--home-accent);
+  font: 0.75rem var(--bq-mono);
+}
+
+.home-topology-worker {
+  border: 1px solid var(--home-line);
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+}
+
+.home-topology figcaption {
+  margin-top: 20px;
+  color: var(--home-muted);
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+.home-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+  padding-block: 28px;
+  border-block: 1px solid var(--home-line);
+  font-size: 0.88rem;
+}
+
+.home-facts strong,
+.home-facts span {
+  display: block;
+}
+
+.home-facts strong {
+  color: var(--sl-color-text);
+  font-weight: 600;
+}
+
+@media (max-width: 1024px) {
+  .bq-home .home-hero {
+    gap: 32px;
+  }
+  .home-topology {
+    padding: 20px;
+  }
+}

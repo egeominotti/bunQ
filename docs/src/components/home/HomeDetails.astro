@@ -1,0 +1,115 @@
+---
+const features = [
+  { title: 'Make failed work retryable.', body: 'Retries with backoff, stall recovery and a dead letter queue you can inspect and replay.', href: '/guide/worker/errors/', link: 'Retries & recovery' },
+  { title: 'Control what runs next.', body: 'Priorities, delayed jobs, rate limits, concurrency controls and FIFO groups.', href: '/guide/queue/', link: 'Queue controls' },
+  { title: 'Schedule and coordinate.', body: 'Cron schedules and parent-child job flows. A separate workflow engine adds in-process orchestration on Bun.', href: '/guide/flow/', link: 'Flows & dependencies' },
+  { title: 'See what is happening.', body: 'Job queries, Prometheus metrics, health probes and events. Connect AI tools through the native MCP server.', href: '/guide/monitoring/', link: 'Monitoring & operations' },
+];
+
+const questions = [
+  {
+    question: 'Is there anything I have to pay for?',
+    answer: 'bunqueue is completely free and open source under the MIT license. The server, clients and queue features are included. There is no paid plan or feature paywall. If you rent a server or database, you pay your infrastructure provider.',
+  },
+  {
+    question: 'Why is it called bunqueue?',
+    answer: 'The core engine uses Bun and its native APIs. The standalone server and embedded runtime require Bun. Network clients use their own runtime, including Node.js, Deno, Python, PHP, Go, Rust and Elixir.',
+  },
+  {
+    question: 'Do I need a bunqueue account or a hosted service?',
+    answer: 'No. Start the included server on your machine or your own infrastructure, then point your client at its host and TCP port. A Bun application can also use embedded mode without a separate server.',
+  },
+  {
+    question: 'Why is my client not connecting?',
+    answer: 'For server mode, start the server first and use a reachable hostname with TCP port 6789. Port 6790 is the HTTP API. Inside Docker, localhost refers to that container. For embedded mode, run on Bun and set embedded: true on both Queue and Worker.',
+  },
+];
+
+const faqSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: questions.map(({ question, answer }) => ({
+    '@type': 'Question', name: question,
+    acceptedAnswer: { '@type': 'Answer', text: answer },
+  })),
+};
+---
+
+<section class="home-section" aria-labelledby="features-title">
+  <div class="home-section-intro">
+    <h2 id="features-title">The useful parts. All included.</h2>
+    <p>Start with a queue and a worker. Add the controls your workload needs.</p>
+  </div>
+  <div class="home-features">
+    {features.map((feature) => (
+      <article>
+        <h3>{feature.title}</h3>
+        <p>{feature.body}</p>
+        <a class="home-text-link" href={feature.href}>{feature.link} <span aria-hidden="true">↗</span></a>
+      </article>
+    ))}
+  </div>
+  <p class="home-note">Official clients share the Queue/Worker/Flow core. Check the <a href="/guide/sdks/#query-control-and-operations">SDK capability matrix</a> for language-specific APIs.</p>
+</section>
+
+<section class="home-section home-storage" aria-labelledby="storage-title">
+  <div class="home-section-intro">
+    <h2 id="storage-title">Start small. Keep your options.</h2>
+    <p>Choose storage when you need it. Your application keeps the same queue API.</p>
+  </div>
+  <div class="home-storage-options">
+    <article>
+      <span class="home-storage-mark" aria-hidden="true">:memory:</span>
+      <h3>Try it in memory</h3>
+      <p>The default. Nothing to provision. Jobs are ephemeral and disappear when the process exits.</p>
+    </article>
+    <article>
+      <span class="home-storage-mark" aria-hidden="true">queue.db</span>
+      <h3>Persist to SQLite</h3>
+      <p>One file, owned by one process. Run embedded on Bun or connect clients to a standalone server.</p>
+    </article>
+    <article>
+      <span class="home-storage-mark" aria-hidden="true">postgres://</span>
+      <h3>Run multiple brokers</h3>
+      <p>Use PostgreSQL as the shared store for several active servers. Operate the database and routing yourself.</p>
+    </article>
+  </div>
+  <a class="home-text-link" href="/guide/databases/">Storage, durability &amp; deployment trade-offs <span aria-hidden="true">↗</span></a>
+</section>
+
+<section class="home-section home-migration" aria-labelledby="migration-title">
+  <div>
+    <span class="home-eyebrow">Coming from BullMQ?</span>
+    <h2 id="migration-title">A familiar way to work.</h2>
+    <p>Keep the Queue and Worker mental model. bunqueue uses its own engine and protocol, with SQLite or PostgreSQL for persistence.</p>
+    <a class="home-text-link" href="/guide/migration/">Read the migration guide <span aria-hidden="true">→</span></a>
+  </div>
+  <div class="home-migration-notes">
+    <p><strong>Moving a Node.js app?</strong><span>Use <code>bunqueue-client</code> and connect to a bunqueue server. Your application stays on Node.js.</span></p>
+    <p><strong>Check the differences first.</strong><span>Review compatibility and scheduling behavior in the <a href="/guide/comparison/">full comparison</a>. Explore the <a href="/guide/benchmarks/">benchmark methodology</a> for performance evidence.</span></p>
+  </div>
+</section>
+
+<section class="home-section home-faq" aria-labelledby="faq-title">
+  <div class="home-section-intro">
+    <h2 id="faq-title">A few things, made clear.</h2>
+    <p>The cost, the name, and the connection.</p>
+  </div>
+  <div>
+    {questions.map(({ question, answer }) => (
+      <details>
+        <summary>{question}</summary>
+        <p>{answer}</p>
+      </details>
+    ))}
+    <a class="home-text-link" href="/faq/">More answers in the FAQ <span aria-hidden="true">↗</span></a>
+  </div>
+</section>
+
+<section class="home-closing" aria-labelledby="closing-title">
+  <h2 id="closing-title">Your jobs. Your infrastructure.</h2>
+  <p>Free and open source, from the first local job to production.</p>
+  <a class="home-button" href="/guide/introduction/">Explore the documentation <span aria-hidden="true">→</span></a>
+</section>
+
+<script type="application/ld+json" set:html={JSON.stringify(faqSchema)} />

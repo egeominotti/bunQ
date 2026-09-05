@@ -1007,9 +1007,11 @@ real dynamic-port TCP broker backed by SQLite. Transport-only
 manually maintained class or method allowlist can hide a new uncovered API.
 
 The Astro documentation site is deployed from the `docs/` Vercel project root.
-Its `vercel.json` keeps the versioned TypeDoc dump crawlable but out of search
-indexes with `X-Robots-Tag: noindex, follow`; per-page Markdown twins receive
-`noindex` to avoid competing with their canonical HTML pages. Configuration
+Its current TypeDoc tree is indexable: `reference-seo.ts` adds canonical URLs
+and per-page metadata to the built files, and `sitemap.ts` includes those URLs.
+Historical reference trees retain their generated `noindex, follow` metadata.
+Per-page Markdown twins receive `X-Robots-Tag: noindex` from `vercel.json` to avoid
+competing with their canonical HTML pages. Configuration
 rationale belongs in this reference rather than in synthetic JSON properties:
 Vercel rejects unknown header-rule keys before starting the Astro build.
 `test/vercel-config.test.ts` pins that schema boundary so this class of
@@ -1038,7 +1040,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 ### Engineering tooling
 
 - [Test Isolation and Reproducibility](./testing.md) — Pinned test image, parallel disposable unit/TCP/embedded containers, per-file TCP server and SQLite isolation, container resource time series, per-test/file timing KPIs, anomaly reports, CI equivalence, cleanup guarantees, and native-only benchmarks.
-- [Documentation Tooling](./features/documentation-tooling.md) — Astro data checks, API-reference generation, and the split Open Graph cover definitions/rendering pipeline under `docs/scripts/`.
+- [Documentation Tooling](./features/documentation-tooling.md) — Shared docs UI and homepage onboarding, Astro data checks, current API-reference SEO and sitemap generation, and the Open Graph rendering pipeline.
 - [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md) — Compiler-discovered exact coverage of every callable Queue/Worker/Job/Cron/DLQ/Flow/Workflow facade method in every applicable mode, plus the TCP-only connection pool, without test doubles.
 - [Benchmarking and Performance Evidence](./features/benchmarks.md) — Native measurement contract, evidence levels, runner catalogue, Workflow Engine single/scale harnesses, persistence labels, protocol-cap handling, integrity requirements, and publication checklist.
 - [Model-Based Queue Verification](./features/model-based-testing.md) — `fast-check` command model against a real broker and SQLite, with layered invariants, shrinking, deterministic replay, dependency flows, limiters, and crash recovery.

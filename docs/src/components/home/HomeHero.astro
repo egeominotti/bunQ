@@ -1,0 +1,48 @@
+---
+import logo from '../../assets/logo.svg';
+import '../../styles/home.css';
+import '../../styles/home-setup.css';
+import '../../styles/home-responsive.css';
+
+const runtimes = ['Node.js', 'Deno', 'Python', 'PHP', 'Go', 'Rust', 'Elixir', 'Bun'];
+---
+
+<section class="home-hero bq-hero" aria-labelledby="home-title">
+  <div class="home-hero-copy">
+    <a class="home-license" href="https://github.com/egeominotti/bunqueue/blob/main/LICENSE">
+      Free &amp; open source <span>MIT licensed</span>
+    </a>
+    <h1 id="home-title">Background jobs.<br /><em>Your stack.</em></h1>
+    <p class="home-hero-sub">Background jobs for Node.js, Deno, Python, PHP, Go, Rust, Elixir and Bun. Free, open source, hosted by you.</p>
+    <div class="home-actions">
+      <a class="home-button" href="#quickstart">Run your first job <span aria-hidden="true">→</span></a>
+      <a class="home-button-secondary" href="https://github.com/egeominotti/bunqueue">Explore the source <span aria-hidden="true">↗</span></a>
+    </div>
+  </div>
+
+  <figure class="home-topology">
+    <div class="home-topology-app">
+      <span class="home-diagram-label">Your application</span>
+      <div class="home-language-grid">
+        {runtimes.map((runtime) => <a href="/guide/sdks/">{runtime}</a>)}
+      </div>
+    </div>
+    <div class="home-topology-wire"><span>add a job</span><span aria-hidden="true">↓</span><code>TCP :6789</code></div>
+    <div class="home-topology-engine">
+      <img src={logo.src} width="42" height="42" alt="" />
+      <div><strong>bunqueue server</strong><span>Runs on Bun. Runs on your infrastructure.</span></div>
+      <span class="home-engine-license">MIT</span>
+    </div>
+    <div class="home-topology-wire"><span>process a job</span><span aria-hidden="true">↓</span><code>TCP :6789</code></div>
+    <div class="home-topology-worker">
+      <strong>Your workers</strong><span>The same language, or a different one.</span>
+    </div>
+    <figcaption>The server runs on Bun. Your application keeps its runtime.</figcaption>
+  </figure>
+</section>
+
+<div class="home-facts" aria-label="Included with bunqueue">
+  <p><strong>Free, including the server.</strong><span>Every queue feature ships under MIT.</span></p>
+  <p><strong>Your infrastructure.</strong><span>Run locally, on a VPS, or in Docker.</span></p>
+  <p><strong>Bun app? Embed it.</strong><span>Queue and worker in one process.</span></p>
+</div>

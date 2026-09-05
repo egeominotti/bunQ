@@ -1,6 +1,6 @@
 ---
-title: 'Introduction: SQLite or PostgreSQL Job Queue for Bun'
-description: 'Discover bunqueue: a Bun job queue with memory or one-file SQLite, PostgreSQL 15–18 multi-broker persistence, zero Redis, cron, and a native MCP server.'
+title: 'Introduction: A Free Job Queue for Your Language'
+description: 'Use bunqueue from Node.js, Deno, Python, PHP, Go, Rust, Elixir or Bun. The free, MIT-licensed server runs on Bun; your application keeps its runtime.'
 head:
   - tag: meta
     attrs:
@@ -12,11 +12,18 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · introduction</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">One process locally. <em>Many brokers when needed.</em></h1>
-  <p class="bq-hero-sub">bunqueue is a job queue for the Bun runtime. Start embedded in memory or with one SQLite file, or run standalone servers against PostgreSQL 15–18 when several brokers must share one authoritative queue. No Redis is required.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">A job queue for <em>your language.</em></h1>
+  <p class="bq-hero-sub">bunqueue is a free, MIT-licensed job queue for Node.js, Deno, Python, PHP, Go, Rust, Elixir and Bun. The name comes from the core engine, which runs on Bun. Your application and workers use their own runtime through an official client.</p>
 </div>
 
-A job queue lets your app hand off slow work (sending emails, processing images, calling APIs) to run in the background instead of blocking a request. bunqueue gives you that with one `bun add`; memory or a configured SQLite file is the zero-infrastructure path, and PostgreSQL is the opt-in multi-broker backend.
+A job queue lets your app hand off slow work (sending emails, processing images, calling APIs) to run in the background instead of blocking a request.
+
+Choose the setup that matches your application:
+
+- **Node.js, Deno, Python, PHP, Go, Rust or Elixir:** run the included bunqueue server, install your language's client, then connect it to the server. Bun is required on the server, not in your application. Follow the [server and client setup](/#quickstart).
+- **Bun:** use the server in the same way, or run the queue and worker together with `embedded: true`. Follow the [embedded quickstart](/guide/quickstart/).
+
+Both options are free and include the queue features. No account, paid plan or Redis service is required. Use memory for ephemeral jobs, SQLite for one-process persistence, or PostgreSQL for several active brokers.
 
 ## See it in 10 lines
 

@@ -102,6 +102,84 @@ targets, model boundaries, topology progression, accessibility hooks, and the
 component subtree in addition to the documentation content already required by
 the test suite.
 
+## Homepage onboarding
+
+The homepage at `docs/src/content/docs/index.mdx` introduces the MIT license,
+the self-hosted Bun server, and network clients before storage or advanced
+features. Its existing `#quickstart` anchor contains a complete local server
+path with explicit TCP/HTTP ports and Node.js, Deno and Python examples. A
+separate tab shows Bun embedded mode with `embedded: true` on both clients.
+The SQLite server example binds to loopback and explicitly enables persistence;
+the embedded example describes its ephemeral default.
+
+`components/home/HomeHero.astro` owns the runtime topology and initial value
+proposition. `HomeDetails.astro` owns capabilities, storage choices, BullMQ
+migration links and FAQs. The FAQ answers and JSON-LD share one data source.
+Homepage styles are scoped through `.bq-home` in `styles/home.css` and
+`styles/home-setup.css`, with narrow layouts in `styles/home-responsive.css`,
+using the existing self-hosted fonts and pink identity.
+The shared footer also states the distinction between engine and client runtimes.
+The generated homepage social card uses its page title and a free/open-source
+eyebrow, including when the hero is rendered through an Astro component.
+Native Starlight tabs and HTML disclosures provide keyboard interactions;
+theme tokens, visible focus states and reduced-motion rules cover both themes.
+The two setup choices fit without horizontal scrolling on narrow screens.
+
+`test/docs-homepage-snippets.test.ts` extracts the homepage's TypeScript fences
+and compiles each as an independent virtual module against the real public
+engine and network-client exports. This catches missing job payload types and
+API drift without duplicating the examples. The unit validation image includes
+the TypeScript SDK source subtree for that check; it does not copy SDK caches
+or install an additional SDK dependency tree.
+
+Validate changes with the snippet regression, docs build/discovery checks and browser inspection
+of server/client tabs, embedded mode, FAQs, desktop/mobile layouts, and both
+themes. No queue lifecycle or SDK implementation changes are involved.
+
+## Search indexing and canonical URLs
+
+`docs/src/lib/reference-seo.ts` collects the current version's TypeDoc HTML,
+adds canonical URLs and page-specific titles/descriptions to the build output,
+and supplies those URLs to the sitemap integration. It leaves the tracked
+generated sources untouched and rejects current pages containing `noindex`.
+Historical reference trees retain their generated `noindex, follow` metadata;
+the hosting configuration only adds `noindex` to raw Markdown mirrors.
+`docs/src/lib/sitemap.ts` owns sitemap priorities and real Git modification dates.
+
+`test/docs-seo.test.ts` covers the hosting policy, deterministic current-only
+page discovery, escaped/idempotent metadata, and actual temporary build output.
+The discovery validator checks authored pages and current reference URLs against
+the sitemap and verifies historical exclusion. See
+[Generated API Reference](../generated-api-reference.md) for the version policy.
+
+## Shared documentation interface
+
+`Header.astro` loads the shared navigation, reading and table styles from
+`docs-navigation.css`, `docs-reading.css` and `docs-tables.css`. They retain
+Starlight's search, sidebar persistence, tab synchronization, mobile drawer,
+and active table-of-contents tracking. Reading styles use `data-has-sidebar`
+to keep guide typography independent of the homepage's introductory layout.
+Language strips retain native scrolling without a permanent fade that masks
+the final selected tab; overflowing strips show a thin scrollbar.
+
+`DocsContext.astro` derives breadcrumbs from the current Starlight sidebar
+tree and links to the existing Markdown/MDX source route. `PageTitle.astro`
+renders the context above standard headings; `MarkdownContent.astro` renders
+it before pages with a custom hero. The homepage owns its single visible H1.
+Custom hero pages receive a visible `#_top` focus target so the skip link and
+overview anchor do not lead into Starlight's hidden title panel.
+
+`DocsTables.astro` wraps authored tables in scroll regions without changing
+their table semantics. Only overflowing regions become focusable landmarks,
+with a label derived from their nearest preceding heading. A ResizeObserver
+updates this state when the viewport or a tab changes and disconnects before
+Astro page swaps. CSS retains scrolling when JavaScript is unavailable.
+
+Introduction and installation copy explicitly separate the Bun engine from
+client runtimes and link new readers to the server/embedded setup choices.
+Verify shared changes on guide, SDK, API and blog pages in both themes, with
+keyboard navigation, wide tables, search, and a narrow mobile viewport.
+
 ## Release checks
 
 - `bun run check:docs-data` verifies generated documentation metadata and

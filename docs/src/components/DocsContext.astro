@@ -1,0 +1,32 @@
+---
+const { sidebar, id, entry } = Astro.locals.starlightRoute;
+type SidebarEntry = (typeof sidebar)[number];
+
+function currentPath(entries: SidebarEntry[]): SidebarEntry[] {
+  for (const item of entries) {
+    if (item.type === 'link' && item.isCurrent) return [item];
+    if (item.type === 'group') {
+      const children = currentPath(item.entries);
+      if (children.length) return [item, ...children];
+    }
+  }
+  return [];
+}
+
+const trail = currentPath(sidebar);
+const currentLabel = trail.at(-1)?.label ?? entry.data.title;
+const groups = trail.filter((item) => item.type === 'group');
+---
+
+<div class="docs-context">
+  <nav aria-label="Breadcrumb">
+    <ol>
+      <li><a href="/guide/introduction/">Docs</a></li>
+      {groups.map((group) => <li><span>{group.label}</span></li>)}
+      <li><span aria-current="page" title={currentLabel}>{currentLabel}</span></li>
+    </ol>
+  </nav>
+  <a class="docs-source-link" href={`/${id}.md`} title="Read the Markdown/MDX source of this page">
+    View Markdown <span aria-hidden="true">↗</span>
+  </a>
+</div>

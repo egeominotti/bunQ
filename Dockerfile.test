@@ -1,6 +1,6 @@
 # Reproducible, disposable test environment. This image is intentionally
 # separate from the production image: it contains source, tests, and tooling.
-ARG BUN_VERSION=1.4.0
+ARG BUN_VERSION=1.4.2
 FROM oven/bun:${BUN_VERSION}
 
 USER root

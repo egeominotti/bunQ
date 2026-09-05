@@ -186,7 +186,7 @@ describe('release graph SDK gate', () => {
     expect(sdkRelease.on.push).toBeUndefined();
     expect(sdkRelease.jobs.sdk?.uses).toBe('./.github/workflows/sdk.yml');
     expect(dependencies(sdkRelease.jobs.publish)).toEqual(['sdk']);
-    expect(releaseText).toContain('bun-version: 1.4.0');
+    expect(releaseText).toContain('bun-version: 1.4.2');
     expect(releaseText).toContain('bun install --frozen-lockfile');
     expect(releaseText).not.toContain('|| bun install');
     expect(releaseText).toContain('test "$GITHUB_REF" = refs/heads/main');

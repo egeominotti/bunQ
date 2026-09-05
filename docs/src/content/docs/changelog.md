@@ -16,6 +16,11 @@ head:
 
 ## Unreleased
 
+### CI/CD
+
+- Pin Bun to 1.4.2 across CI, SDK workflows, release images, and disposable test
+  images; align deployment examples and the release-gate regression check.
+
 ### Queue and SDK performance
 
 - Flow creation now batches its telemetry writes after the atomic graph commit,

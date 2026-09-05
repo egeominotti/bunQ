@@ -561,7 +561,7 @@ per-attempt floors.
 
 The environment is reproducible:
 
-- Bun is pinned to 1.4.0, matching CI, the SDK gates, and the release build environment.
+- Bun is pinned to 1.4.2, matching CI, the SDK gates, and the release build environment.
 - Dependencies use `bun install --frozen-lockfile --ignore-scripts`.
 - Timezone is UTC and the process runs as the image's non-root `bun` user.
 - OpenSSL is installed because the TLS regression suites generate certificates.

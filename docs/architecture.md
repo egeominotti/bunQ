@@ -1050,7 +1050,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 ### Engineering tooling
 
 - [Test Isolation and Reproducibility](./testing.md) — Pinned test image, parallel disposable unit/TCP/embedded containers, per-file TCP server and SQLite isolation, container resource time series, per-test/file timing KPIs, anomaly reports, CI equivalence, cleanup guarantees, and native-only benchmarks.
-- [Documentation Tooling](./features/documentation-tooling.md) — Shared docs UI and homepage onboarding, Astro data checks, current API-reference SEO and sitemap generation, and the Open Graph rendering pipeline.
+- [Documentation Tooling](./features/documentation-tooling.md) — Shared docs UI and homepage onboarding (including `HomeDockerQuickstart.astro` for Docker variant selection), Astro data checks, current API-reference SEO and sitemap generation, and the Open Graph rendering pipeline.
 - [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md) — Compiler-discovered exact coverage of every callable Queue/Worker/Job/Cron/DLQ/Flow/Workflow facade method in every applicable mode, plus the TCP-only connection pool, without test doubles.
 - [Benchmarking and Performance Evidence](./features/benchmarks.md) — Native measurement contract, evidence levels, runner catalogue, Workflow Engine single/scale harnesses, persistence labels, protocol-cap handling, integrity requirements, and publication checklist.
 - [Model-Based Queue Verification](./features/model-based-testing.md) — `fast-check` command model against a real broker and SQLite, with layered invariants, shrinking, deterministic replay, dependency flows, limiters, and crash recovery.

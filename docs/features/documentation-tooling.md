@@ -115,6 +115,11 @@ the embedded example describes its ephemeral default.
 `components/home/HomeHero.astro` owns the runtime topology and initial value
 proposition. `HomeDetails.astro` owns capabilities, storage choices, BullMQ
 migration links and FAQs. The FAQ answers and JSON-LD share one data source.
+`HomeDockerQuickstart.astro` provides the default server setup, with four Linux
+variant tabs, copyable Docker commands, loopback port mappings, a persistent
+named volume and an HTTP readiness check. Starlight's Code component supplies
+copy controls. The Bun CLI remains available in its own tab. Moving image tags
+are identified explicitly; deployment guidance recommends a version or digest.
 Homepage styles are scoped through `.bq-home` in `styles/home.css` and
 `styles/home-setup.css`, with narrow layouts in `styles/home-responsive.css`,
 using the existing self-hosted fonts and pink identity.

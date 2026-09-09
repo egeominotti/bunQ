@@ -82,11 +82,17 @@ is not supported. CI validates PostgreSQL 15, 16, 17, and the pinned/recommended
 18.6 release. See the
 [storage guide](https://bunqueue.dev/guide/databases/).
 
+### Docker images
+
+All four images run the same bunqueue server with the same queue features,
+protocols, and persistence options. The difference is the Linux base and the
+tools available inside the container.
+
 Starting with 2.9.5, completed releases publish to both Docker Hub
 (`egeominotti/bunqueue`) and GHCR (`ghcr.io/egeominotti/bunqueue`), with matching
 version, `latest`, and variant tags. Build references are kept on GHCR only.
-Each image supports
-`linux/amd64` and `linux/arm64`; Docker selects the matching architecture.
+Each image supports `linux/amd64` and `linux/arm64`; Docker selects the matching
+architecture automatically. You choose the distribution, not the CPU tag.
 Pin a version or digest for reproducible deployments. Confirm a tag exists with
 `docker buildx imagetools inspect egeominotti/bunqueue:<tag>` before using it.
 
@@ -99,12 +105,48 @@ Choose a Linux distribution with the same tags on either registry:
 | Debian slim | `2.9.5-slim` | `slim` | Debian 13 slim |
 | Distroless | `2.9.5-distroless` | `distroless` | Debian 13, no shell or package manager |
 
+**Which variant should I use?**
+
+- **Alpine** is the default for a compact deployment. It uses musl and includes
+  a shell and the `apk` package manager. Choose it when you do not need Debian
+  tooling or glibc compatibility for additional software.
+- **Debian** uses glibc and the standard Debian base, with a shell and `apt`.
+  Choose it when familiar Debian tools and a fuller base matter more than image
+  size. Additional troubleshooting tools may still need to be installed.
+- **Debian slim** keeps glibc, a shell, and `apt` in a reduced Debian base.
+  Choose it when you want Debian compatibility with fewer bundled utilities.
+- **Distroless** contains the compiled server and its required runtime libraries,
+  without a shell or package manager. Choose it when you operate through logs,
+  health checks, and external debugging tools; `docker exec ... sh` is unavailable.
+
+The distribution does not select a faster queue engine or unlock extra features.
+All images run as a non-root user; having a package manager does not grant that
+user permission to install packages at runtime.
+
+**Try a specific variant** by changing only the image tag:
+
+```bash
+docker run -d --name bunqueue --restart unless-stopped \
+  -p 127.0.0.1:6789:6789 -p 127.0.0.1:6790:6790 \
+  -v bunqueue-data:/app/data \
+  egeominotti/bunqueue:2.9.5-alpine
+
+curl --fail http://127.0.0.1:6790/health
+```
+
+This example exposes the APIs only on your machine. Replace `2.9.5-alpine` with
+`2.9.5-debian`, `2.9.5-slim`, or `2.9.5-distroless` to choose another base.
+Moving tags such as `alpine` follow newer releases; version tags identify a
+release, while a digest pins the exact image even across base-image rebuilds.
+
 Every variant supports both architectures, runs as UID/GID `1001:1001`, and
 stores SQLite data in `/app/data`. Unsuffixed tags such as `2.9.5` stay on Alpine.
 Production images contain the compiled server and required system libraries;
 development dependencies and a separate Bun installation stay out of the image.
 The built-in health check uses `/app/bunqueue healthcheck`, including on distroless.
 See the [deployment guide](https://bunqueue.dev/guide/deployment/) for custom probes.
+
+### Standalone executables and network clients
 
 Prefer a standalone executable? [GitHub releases](https://github.com/egeominotti/bunqueue/releases)
 include the Bun runtime, so no Bun or Node.js installation is needed. From 2.9.5,

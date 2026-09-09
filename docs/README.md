@@ -161,7 +161,8 @@ Documentation tooling spans `docs/scripts/` and `docs/src/lib/`. The Open Graph
 generator separates cover definitions from rendering; `reference-seo.ts` adds
 current API canonicals and metadata, while `sitemap.ts` owns sitemap priorities.
 Shared documentation navigation, reading styles and homepage onboarding live in
-`docs/src/components/` and `docs/src/styles/`; see
+`docs/src/components/` and `docs/src/styles/`, including the Docker variant
+selector in `home/HomeDockerQuickstart.astro`; see
 [Documentation Tooling](./features/documentation-tooling.md).
 
 The Queue query split (`operations/query.ts`, `queryStates.ts`, and

@@ -32,6 +32,8 @@ head:
   CI authentication check and tarball publication receive the configured token.
 - Keep Docker Hub tags limited to release versions and variant aliases. Retain
   build references on GHCR and stop generating timestamp tags.
+- Explain Docker base-image differences in the README and add a homepage Docker
+  quickstart with variant selection, copyable commands and persistent storage.
 
 ### Canonical client parity
 

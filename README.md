@@ -84,7 +84,8 @@ is not supported. CI validates PostgreSQL 15, 16, 17, and the pinned/recommended
 
 Starting with 2.9.5, completed releases publish to both Docker Hub
 (`egeominotti/bunqueue`) and GHCR (`ghcr.io/egeominotti/bunqueue`), with matching
-version, `latest`, commit SHA, and timestamp tags. Each image supports
+version, `latest`, and variant tags. Build references are kept on GHCR only.
+Each image supports
 `linux/amd64` and `linux/arm64`; Docker selects the matching architecture.
 Pin a version or digest for reproducible deployments. Confirm a tag exists with
 `docker buildx imagetools inspect egeominotti/bunqueue:<tag>` before using it.

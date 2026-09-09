@@ -514,12 +514,8 @@ jobs:
           tags: |
             type=raw,value=${{ needs.version-gate.outputs.version }},enable=${{ matrix.variant == 'alpine' }}
             type=raw,value=latest,enable=${{ matrix.variant == 'alpine' }}
-            type=sha,prefix=,enable=${{ matrix.variant == 'alpine' }}
-            type=raw,value={{date 'YYYYMMDD-HHmm'}},enable=${{ matrix.variant == 'alpine' }}
             type=raw,value=${{ needs.version-gate.outputs.version }}-${{ matrix.variant }}
             type=raw,value=${{ matrix.variant }}
-            type=sha,prefix=,suffix=-${{ matrix.variant }}
-            type=raw,value={{date 'YYYYMMDD-HHmm'}}-${{ matrix.variant }}
 
       - name: Publish the tested images and multi-platform tags
         env:
@@ -530,21 +526,28 @@ jobs:
           for arch in amd64 arm64; do
             docker load -i "/tmp/docker-images/image-$arch.tar"
           done
-          for registry in "$REGISTRY/$IMAGE_NAME" docker.io/egeominotti/bunqueue; do
-            refs=()
-            for arch in amd64 arm64; do
-              ref="$registry:$GITHUB_SHA-$VARIANT-$arch"
-              docker tag "bunqueue-candidate:$VARIANT-$arch" "$ref"
-              docker push "$ref"
-              refs+=("$ref")
-            done
-            tags=()
-            while IFS= read -r tag; do
-              if [[ "$tag" == "$registry:"* ]]; then tags+=(--tag "$tag"); fi
-            done <<< "$TAGS"
-            test "${#tags[@]}" -gt 0
-            docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+          registry="$REGISTRY/$IMAGE_NAME"
+          image_index="$registry:$GITHUB_SHA-$VARIANT"
+          ghcr_tags=(--tag "$image_index")
+          hub_tags=()
+          while IFS= read -r tag; do
+            if [[ "$tag" == "$registry:"* ]]; then
+              ghcr_tags+=(--tag "$tag")
+            elif [[ "$tag" == docker.io/egeominotti/bunqueue:* ]]; then
+              hub_tags+=(--tag "$tag")
+            fi
+          done <<< "$TAGS"
+          test "${#ghcr_tags[@]}" -gt 2
+          test "${#hub_tags[@]}" -gt 0
+          refs=()
+          for arch in amd64 arm64; do
+            ref="$registry:$GITHUB_SHA-$VARIANT-$arch"
+            docker tag "bunqueue-candidate:$VARIANT-$arch" "$ref"
+            docker push "$ref"
+            refs+=("$ref")
           done
+          docker buildx imagetools create "${ghcr_tags[@]}" "${refs[@]}"
+          docker buildx imagetools create "${hub_tags[@]}" "$image_index"
 
   # ============================================
   # Root npm package: explicit version request, after all product/image gates.

@@ -116,7 +116,7 @@ Priority when the same option is set in more than one place: CLI flags > config 
 ## Run it in Docker
 
 Every completed release publishes the multi-arch image with the exact version
-tag alongside `latest`, the commit SHA and a build timestamp. Pin the version
+tag alongside `latest` and the distribution variants. Pin the version
 tag when the server and client must move together:
 
 ```bash

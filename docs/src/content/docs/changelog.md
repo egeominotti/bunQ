@@ -30,6 +30,8 @@ head:
   npm publication input that waits for all product and image checks.
 - Pass npm credentials through Bun's native `NPM_CONFIG_TOKEN` variable so the
   CI authentication check and tarball publication receive the configured token.
+- Keep Docker Hub tags limited to release versions and variant aliases. Retain
+  build references on GHCR and stop generating timestamp tags.
 
 ### Canonical client parity
 
@@ -57,7 +59,7 @@ head:
   completing the eight primary Bun targets. Require all eight compressed assets
   before publishing the release and include their SHA-256 checksums.
 - Publish release images to Docker Hub at `egeominotti/bunqueue` alongside
-  GHCR, with matching version, latest, commit, and timestamp tags for amd64 and arm64.
+  GHCR, with matching version, latest, and variant tags for amd64 and arm64.
 - Update the README and installation/deployment guides with Docker Hub commands,
   the eight standalone downloads, and runtime and persistence requirements.
 - Pin Bun to 1.4.2 across CI, SDK workflows, release images, and disposable test

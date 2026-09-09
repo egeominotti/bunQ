@@ -38,11 +38,13 @@ under ignored `artifacts/docker-images/`. Cleanup removes the container and volu
 
 Successful candidates are exported as image archives. Only after all eight
 native checks pass does the publication matrix load those exact archives,
-push commit/variant/architecture tags, and assemble two-platform indexes for
-Docker Hub and GHCR. No rebuild occurs between the smoke test and publication.
-Version/variant, moving variant, SHA/variant, and timestamp/variant tags exist for
-every variant. Unsuffixed version/latest/SHA/timestamp aliases select Alpine only.
-Full-SHA/variant/architecture tags retain the underlying platform images.
+push full-SHA/variant/architecture tags to GHCR, and assemble a two-platform
+full-SHA/variant index there. Docker Hub receives a copy of that completed index.
+No rebuild occurs between the smoke test and publication.
+Both registries expose version/variant and moving variant tags. Unsuffixed version
+and latest aliases select Alpine only. Build references stay on GHCR; Docker Hub
+contains no commit, timestamp, or architecture-only staging tags. The workflow
+does not generate timestamp tags in either registry.
 
 Normal pushes publish only new package versions. A manual CI run on main with
 `rebuild_docker=true` repeats all quality, binary, and image gates and republishes

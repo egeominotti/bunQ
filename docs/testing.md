@@ -715,10 +715,15 @@ host/container clock skew cannot turn lifecycle coverage into a timing-only
 failure. The version gate, binary matrix, container publication, and GitHub release are all
 transitively downstream; Docker publication also waits for the complete binary
 matrix. Each successful Docker release publishes the exact package version
-alongside `latest`, the commit SHA, and a timestamp, so production deployments
-can pin the same version as npm without losing the moving convenience tag.
+alongside `latest` and the variant aliases, so production deployments can pin
+the same version as npm without losing the moving convenience tag.
 The same multi-platform build (`linux/amd64` and `linux/arm64`) publishes these
 tags to both `ghcr.io/egeominotti/bunqueue` and `docker.io/egeominotti/bunqueue`.
+Native image staging tags and the full-SHA variant index exist only on GHCR.
+Docker Hub receives a copy of the completed GHCR index with public version and
+variant aliases. Neither registry receives new timestamp tags. The publication
+regression executes the workflow shell with a recording Docker stub to verify
+the registry destinations and the index-copy source without remote writes.
 Docker Hub authentication uses the GitHub Actions repository secrets
 `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`; the token must have write access to
 `egeominotti/bunqueue`. GHCR continues to use `GITHUB_TOKEN`. A Docker Hub login

@@ -28,6 +28,8 @@ head:
   rebuilds of an existing version through the full CI gates.
 - Fail closed on Git tag lookup errors and add an explicit, version-checked root
   npm publication input that waits for all product and image checks.
+- Pass npm credentials through Bun's native `NPM_CONFIG_TOKEN` variable so the
+  CI authentication check and tarball publication receive the configured token.
 
 ### Canonical client parity
 

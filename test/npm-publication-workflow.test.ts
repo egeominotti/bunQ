@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 type Job = {
   if?: string;
@@ -50,12 +53,56 @@ test('npm publishes the saved verified tarball using supported Bun flags', () =>
     (step) => step.name === 'Verify npm authentication and publication dry run'
   );
   expect(dryRun?.run).toContain('bun publish --dry-run');
-  expect(dryRun?.env?.NODE_AUTH_TOKEN).toBe('${{ secrets.NPM_TOKEN }}');
-  expect(steps[build].env?.NODE_AUTH_TOKEN).toBeUndefined();
+  expect(dryRun?.env?.NPM_CONFIG_TOKEN).toBe('${{ secrets.NPM_TOKEN }}');
+  expect(steps[build].env?.NPM_CONFIG_TOKEN).toBeUndefined();
   expect(steps[publish].run).toBe(
     'bun publish --access public "/tmp/npm-package/bunqueue-$REQUESTED_VERSION.tgz"'
   );
-  expect(steps[publish].env?.NODE_AUTH_TOKEN).toBe('${{ secrets.NPM_TOKEN }}');
+  expect(steps[publish].env?.NPM_CONFIG_TOKEN).toBe('${{ secrets.NPM_TOKEN }}');
   expect(npm.permissions?.['id-token']).toBeUndefined();
   expect(text).not.toContain('npm publish');
 });
+
+test('the configured credential variable authenticates the pinned Bun CLI', async () => {
+  const step = workflow.jobs.npm.steps?.find(
+    (item) => item.name === 'Verify npm authentication and publication dry run'
+  );
+  expect(step?.env?.NPM_CONFIG_TOKEN).toBe('${{ secrets.NPM_TOKEN }}');
+  const directory = await mkdtemp(join(tmpdir(), 'bunqueue-npm-auth-'));
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      return request.headers.get('authorization') === 'Bearer synthetic-test-token'
+        ? Response.json({ username: 'test-publisher' })
+        : new Response('Unauthorized', { status: 401 });
+    },
+  });
+  try {
+    await Bun.write(join(directory, 'package.json'), '{}');
+    const child = Bun.spawn(
+      [process.execPath, 'pm', 'whoami', '--registry', `http://127.0.0.1:${server.port}`],
+      {
+        cwd: directory,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { PATH: process.env.PATH, NPM_CONFIG_TOKEN: 'synthetic-test-token' },
+      }
+    );
+    const timeout = setTimeout(() => child.kill(), 5000);
+    try {
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect({ code, stdout, stderr }).toEqual({ code: 0, stdout: 'test-publisher\n', stderr: '' });
+    } finally {
+      clearTimeout(timeout);
+      if (child.exitCode === null) child.kill();
+    }
+  } finally {
+    server.stop(true);
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 10_000);

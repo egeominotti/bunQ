@@ -589,7 +589,7 @@ jobs:
           bun pm whoami
           bun publish --dry-run "/tmp/npm-package/bunqueue-$REQUESTED_VERSION.tgz"
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: npm-bunqueue-${{ inputs.npm_version }}
@@ -598,7 +598,7 @@ jobs:
       - name: Publish the verified tarball
         run: bun publish --access public "/tmp/npm-package/bunqueue-$REQUESTED_VERSION.tgz"
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ============================================
   # Create Release (only on main)

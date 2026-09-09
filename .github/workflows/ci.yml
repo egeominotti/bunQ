@@ -5,6 +5,16 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      rebuild_docker:
+        description: 'Rebuild and publish Docker variants for the current version (main only)'
+        type: boolean
+        default: false
+      npm_version:
+        description: 'Exact root bunqueue version to publish to npm (blank disables publishing)'
+        type: string
+        default: ''
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -310,25 +320,40 @@ jobs:
     needs: [quality-gate]
     if: >-
       needs.quality-gate.result == 'success' &&
-      github.event_name == 'push' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.ref == 'refs/heads/main'
     outputs:
       version: ${{ steps.gate.outputs.version }}
       should_release: ${{ steps.gate.outputs.should_release }}
+      should_build: ${{ steps.gate.outputs.should_build }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Decide whether this version is already released
         id: gate
+        env:
+          REBUILD_DOCKER: ${{ inputs.rebuild_docker == true || inputs.npm_version != '' }}
+          REQUESTED_NPM_VERSION: ${{ inputs.npm_version }}
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
+          if [[ -n "${REQUESTED_NPM_VERSION:-}" && "$REQUESTED_NPM_VERSION" != "$VERSION" ]]; then
+            echo "::error::Requested npm version does not match package.json"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
             echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::v$VERSION already released — skipping binary build, docker push, and release."
+            echo "should_build=$REBUILD_DOCKER" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$VERSION already released; Docker rebuild requested: $REBUILD_DOCKER"
           else
+            status=$?
+            if [ "$status" -ne 2 ]; then
+              echo "::error::Unable to check release tag (git exited $status)"
+              exit "$status"
+            fi
             echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
             echo "::notice::v$VERSION is new — building binaries and cutting a release."
           fi
 
@@ -339,7 +364,7 @@ jobs:
     name: Build (${{ matrix.target }})
     runs-on: ubuntu-latest
     needs: [version-gate]
-    if: needs.version-gate.outputs.should_release == 'true'
+    if: needs.version-gate.outputs.should_build == 'true'
     strategy:
       matrix:
         include:
@@ -388,26 +413,82 @@ jobs:
           retention-days: 7
 
   # ============================================
-  # Docker Build & Push (only on main)
+  # Test each production image on native architecture before any publication.
   # ============================================
-  docker:
-    name: Docker
-    runs-on: ubuntu-latest
+  docker-test:
+    name: Docker test (${{ matrix.variant }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     needs: [version-gate, build]
+    if: needs.version-gate.outputs.should_build == 'true' && needs.build.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [alpine, debian, slim, distroless]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build native candidate
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          build-args: VARIANT=${{ matrix.variant }}
+          load: true
+          tags: bunqueue-candidate:${{ matrix.variant }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=docker-${{ matrix.variant }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.variant }}-${{ matrix.arch }}
+      - name: Validate health, authentication, persistence, and cleanup
+        run: bun scripts/test-docker-image.ts bunqueue-candidate:${{ matrix.variant }}-${{ matrix.arch }}
+      - name: Preserve image validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-evidence-${{ matrix.variant }}-${{ matrix.arch }}
+          path: artifacts/docker-images/
+          retention-days: 7
+      - name: Export tested image
+        run: docker save bunqueue-candidate:${{ matrix.variant }}-${{ matrix.arch }} -o /tmp/image-${{ matrix.arch }}.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-${{ matrix.variant }}-${{ matrix.arch }}
+          path: /tmp/image-${{ matrix.arch }}.tar
+          compression-level: 0
+          retention-days: 1
+
+  docker:
+    name: Docker (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    needs: [version-gate, build, docker-test]
     if: >-
-      needs.version-gate.outputs.should_release == 'true' &&
-      needs.build.result == 'success'
+      needs.version-gate.outputs.should_build == 'true' &&
+      needs.build.result == 'success' && needs.docker-test.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [alpine, debian, slim, distroless]
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: docker-${{ matrix.variant }}-*
+          path: /tmp/docker-images
+          merge-multiple: true
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
@@ -431,21 +512,93 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
             docker.io/egeominotti/bunqueue
           tags: |
-            type=raw,value=${{ needs.version-gate.outputs.version }}
-            type=raw,value=latest
-            type=sha,prefix=
-            type=raw,value={{date 'YYYYMMDD-HHmm'}}
+            type=raw,value=${{ needs.version-gate.outputs.version }},enable=${{ matrix.variant == 'alpine' }}
+            type=raw,value=latest,enable=${{ matrix.variant == 'alpine' }}
+            type=sha,prefix=,enable=${{ matrix.variant == 'alpine' }}
+            type=raw,value={{date 'YYYYMMDD-HHmm'}},enable=${{ matrix.variant == 'alpine' }}
+            type=raw,value=${{ needs.version-gate.outputs.version }}-${{ matrix.variant }}
+            type=raw,value=${{ matrix.variant }}
+            type=sha,prefix=,suffix=-${{ matrix.variant }}
+            type=raw,value={{date 'YYYYMMDD-HHmm'}}-${{ matrix.variant }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
+      - name: Publish the tested images and multi-platform tags
+        env:
+          VARIANT: ${{ matrix.variant }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            docker load -i "/tmp/docker-images/image-$arch.tar"
+          done
+          for registry in "$REGISTRY/$IMAGE_NAME" docker.io/egeominotti/bunqueue; do
+            refs=()
+            for arch in amd64 arm64; do
+              ref="$registry:$GITHUB_SHA-$VARIANT-$arch"
+              docker tag "bunqueue-candidate:$VARIANT-$arch" "$ref"
+              docker push "$ref"
+              refs+=("$ref")
+            done
+            tags=()
+            while IFS= read -r tag; do
+              if [[ "$tag" == "$registry:"* ]]; then tags+=(--tag "$tag"); fi
+            done <<< "$TAGS"
+            test "${#tags[@]}" -gt 0
+            docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+          done
+
+  # ============================================
+  # Root npm package: explicit version request, after all product/image gates.
+  # ============================================
+  npm:
+    name: Publish bunqueue to npm
+    runs-on: ubuntu-latest
+    needs: [version-gate, build, docker]
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.npm_version != '' &&
+      github.ref == 'refs/heads/main' && needs.build.result == 'success' &&
+      needs.docker.result == 'success'
+    permissions:
+      contents: read
+    env:
+      REQUESTED_VERSION: ${{ inputs.npm_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Verify the explicitly requested unpublished version
+        run: |
+          set -euo pipefail
+          test "$REQUESTED_VERSION" = "$(node -p "require('./package.json').version")"
+          bun -e '
+            const response = await fetch("https://registry.npmjs.org/bunqueue/" + encodeURIComponent(process.env.REQUESTED_VERSION));
+            if (response.status !== 404) throw new Error("Publication blocked: registry returned " + response.status);
+          '
+      - name: Build and verify the package consumer contract
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun test test/package-consumer-smoke.test.ts
+          mkdir -p /tmp/npm-package
+          bun pm pack --ignore-scripts --destination /tmp/npm-package
+      - name: Verify npm authentication and publication dry run
+        run: |
+          bun pm whoami
+          bun publish --dry-run "/tmp/npm-package/bunqueue-$REQUESTED_VERSION.tgz"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-bunqueue-${{ inputs.npm_version }}
+          path: /tmp/npm-package/*.tgz
+          retention-days: 7
+      - name: Publish the verified tarball
+        run: bun publish --access public "/tmp/npm-package/bunqueue-$REQUESTED_VERSION.tgz"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ============================================
   # Create Release (only on main)

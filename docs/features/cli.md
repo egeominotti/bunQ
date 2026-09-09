@@ -1,5 +1,15 @@
 # CLI
 
+`healthcheck [url]` is the shell-free production container probe. It defaults to
+`http://127.0.0.1:${HTTP_PORT ?? 6790}/health`, accepts HTTP/HTTPS only, rejects
+redirects, enforces a five-second deadline, and requires both a successful HTTP
+status and a JSON object with `status: "healthy"`. It exits 0 and prints `healthy`
+on success; otherwise it exits 1 with a generic message that omits response data
+and credentials. It never opens a database or starts a broker. The command
+does not resolve server config files or start flags; pass an explicit URL when
+those override the listener. TLS certificate verification remains enabled.
+See [Docker images](./docker-images.md) for the packaging and publication gates.
+
 > **Category:** Interface · **Source:** `src/cli/index.ts`, `src/cli/globalOptions.ts`, `src/cli/localOutput.ts`, `src/cli/client.ts`, `src/cli/commandRegistry.ts`, `src/cli/commandRouter.ts`, `src/cli/output.ts`, `src/cli/help.ts`, `src/cli/commands/*.ts`
 
 ## Purpose
@@ -13,7 +23,7 @@ Owns:
   of network verbs/subcommands; `commandRouter.ts` gates and dispatches builders.
 - **TCP client transport for the one-shot CLI** — connect, optional `Auth`, send one command, await one framed msgpack response, close (`src/cli/client.ts:181-258`).
 - **Output formatting** — colorized tables/objects and error rendering, plus a JSON pass-through (`src/cli/output.ts`). `localOutput.ts` is the single writer for local commands.
-- **Local (non-TCP) commands** — `version`, `doctor`, and `backup` run client-side against HTTP/health or S3 directly. Doctor separates HTTP collection, pure evaluation, and rendering.
+- **Local (non-TCP) commands** — `version`, `doctor`, `healthcheck`, and `backup` run client-side against HTTP/health or S3 directly. Doctor separates HTTP collection, pure evaluation, and rendering.
 - **Help text** (`src/cli/help.ts`), including the polyglot product line
   `One queue. Any language.` shared with the startup banner.
 

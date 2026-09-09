@@ -1,5 +1,10 @@
 # Architecture Overview
 
+Production container packaging provides Alpine, Debian, Debian slim, and
+distroless variants of the same compiled server. Native image checks precede
+publication to Docker Hub and GHCR; the default remains Alpine. See
+[Docker images](./features/docker-images.md) for the build stages and data flow.
+
 The default `bunqueue-client` package is generated from the same `src/client`
 implementation as `bunqueue/client`. Only runtime I/O boundaries differ;
 build manifests, exact declaration checks, shared contracts, and differential

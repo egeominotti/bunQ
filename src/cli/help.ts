@@ -92,6 +92,7 @@ MONITORING:
   stats                           Show server statistics
   metrics                         Show Prometheus metrics
   health                          Health check
+  healthcheck [url]               HTTP container probe (defaults to HTTP_PORT)
   ping                            Check TCP connectivity
   version                         Show client and server version
   doctor                          Run diagnostics (version, health, queues)

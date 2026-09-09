@@ -16,6 +16,19 @@ head:
 
 ## [2.9.5] - 2026-09-09
 
+### Docker distribution variants
+
+- Publish Alpine, Debian 13, Debian slim, and distroless variants to Docker Hub
+  and GHCR for Linux amd64 and arm64. Keep unsuffixed version and latest tags on
+  Alpine, with a shared non-root UID and persistent data volume.
+- Remove the separate Bun runtime and build dependencies from production images.
+  Add the shell-free `healthcheck [url]` HTTP probe for every variant.
+- Require native image checks for authentication, health, and SQLite recovery
+  before publishing the exact tested images. Allow explicitly requested Docker
+  rebuilds of an existing version through the full CI gates.
+- Fail closed on Git tag lookup errors and add an explicit, version-checked root
+  npm publication input that waits for all product and image checks.
+
 ### Canonical client parity
 
 - Build `bunqueue-client` from the canonical Bun client source, sharing Queue,

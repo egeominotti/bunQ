@@ -14,7 +14,13 @@ const qualityJobs = [
 ] as const;
 
 type Job = {
-  strategy?: { matrix?: { include?: Array<{ target: string; artifact: string }> } };
+  strategy?: {
+    matrix?: {
+      variant?: string[];
+      arch?: string[];
+      include?: Array<{ target: string; artifact: string; arch?: string; runner?: string }>;
+    };
+  };
   if?: string;
   needs?: string | string[];
   'runs-on'?: string;
@@ -77,7 +83,8 @@ function releaseGraphViolations(ci: Workflow, sdk: Workflow): string[] {
   for (const [job, required] of [
     ['version-gate', ['quality-gate']],
     ['build', ['version-gate']],
-    ['docker', ['version-gate', 'build']],
+    ['docker-test', ['version-gate', 'build']],
+    ['docker', ['version-gate', 'build', 'docker-test']],
     ['release', ['version-gate', 'build', 'docker']],
   ] as const) {
     const jobNeeds = dependencies(ci.jobs[job]);
@@ -165,11 +172,44 @@ describe('release graph SDK gate', () => {
       '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}',
       'docker.io/egeominotti/bunqueue',
     ]);
-    const publish = steps.find((step) => step.uses === 'docker/build-push-action@v6');
-    expect(publish?.with?.platforms).toBe('linux/amd64,linux/arm64');
-    expect(publish?.with?.tags).toBe('${{ steps.meta.outputs.tags }}');
-    expect(publish?.with?.push).toBe(true);
+    const publish = steps.find(
+      (step) => step.name === 'Publish the tested images and multi-platform tags'
+    );
+    expect(publish?.run).toContain('for arch in amd64 arm64');
+    expect(publish?.run).toContain('docker load');
+    expect(publish?.run).toContain('docker buildx imagetools create');
+    expect(steps.some((step) => step.uses === 'docker/build-push-action@v6')).toBe(false);
     expect(steps.indexOf(hubLogin!)).toBeLessThan(steps.indexOf(publish!));
+  });
+
+  test('all four variants require native image tests and only Alpine receives default aliases', () => {
+    const variants = ['alpine', 'debian', 'slim', 'distroless'];
+    expect(ci.jobs['docker-test'].strategy?.matrix?.variant).toEqual(variants);
+    expect(ci.jobs.docker.strategy?.matrix?.variant).toEqual(variants);
+    expect(ci.jobs['docker-test'].strategy?.matrix?.arch).toEqual(['amd64', 'arm64']);
+    expect(ci.jobs['docker-test'].strategy?.matrix?.include).toEqual([
+      { arch: 'amd64', runner: 'ubuntu-latest' },
+      { arch: 'arm64', runner: 'ubuntu-24.04-arm' },
+    ]);
+    expect(ci.jobs.docker.if).toContain("needs.docker-test.result == 'success'");
+    const tags = String(
+      ci.jobs.docker.steps?.find((step) => step.uses === 'docker/metadata-action@v5')?.with?.tags
+    );
+    expect(tags).toContain("type=raw,value=latest,enable=${{ matrix.variant == 'alpine' }}");
+    expect(tags).toContain(
+      'type=raw,value=${{ needs.version-gate.outputs.version }}-${{ matrix.variant }}'
+    );
+    const smoke = ci.jobs['docker-test'].steps?.findIndex((step) =>
+      step.name?.startsWith('Validate health')
+    );
+    const upload = ci.jobs['docker-test'].steps?.findIndex(
+      (step) => step.uses === 'actions/upload-artifact@v4'
+    );
+    expect(smoke).toBeGreaterThan(-1);
+    expect(upload).toBeGreaterThan(smoke!);
+    expect(ci.on.workflow_dispatch).toBeDefined();
+    expect(ci.jobs['version-gate'].if).toContain("github.ref == 'refs/heads/main'");
+    expect(ci.jobs.release.if).toContain("needs.version-gate.outputs.should_release == 'true'");
   });
 
   test('all eight executable targets have matching published archives', () => {
@@ -224,6 +264,7 @@ describe('release graph SDK gate', () => {
       ['version-gate', 'quality-gate'],
       ['build', 'version-gate'],
       ['docker', 'build'],
+      ['docker', 'docker-test'],
       ['release', 'docker'],
     ] as const) {
       const mutant = structuredClone(ci);

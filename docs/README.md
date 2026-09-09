@@ -17,6 +17,9 @@ for AI agents.
 
 ## Start here
 
+For production bases, health checks, and native publication gates, see
+[Docker images](./features/docker-images.md).
+
 For the shared Bun/Node/Deno client build and its blocking compatibility
 checks, see [Canonical client parity](./features/client-runtime-parity.md).
 

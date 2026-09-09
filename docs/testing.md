@@ -723,8 +723,23 @@ Docker Hub authentication uses the GitHub Actions repository secrets
 `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`; the token must have write access to
 `egeominotti/bunqueue`. GHCR continues to use `GITHUB_TOKEN`. A Docker Hub login
 or push failure fails the Docker job and blocks the downstream GitHub release.
-Adding credentials or changing the workflow does not publish an already released
-version: the existing version gate still requires a new package version on main.
+Normal pushes skip already released versions. A manual CI run on main with
+`rebuild_docker=true` repeats the quality and binary gates and republishes Docker
+images for the current package version without editing its GitHub release/tag.
+The four-variant native amd64/arm64 image test matrix must pass in full before
+publication. It exports the tested images; publishing loads those exact archives
+instead of rebuilding. See [Docker images](./features/docker-images.md) for the
+offline smoke checks, tag mapping, and artifact lifecycle.
+The optional manual `npm_version` input must exactly match `package.json` and
+also requests the Docker rebuild path. The root npm job waits for the binary
+and Docker gates, verifies that the registry returns 404 for that version,
+rechecks the packed consumer contract, and publishes its saved tarball with
+`bun publish --access public` using the existing `NPM_TOKEN` Actions secret.
+The pinned Bun version does not support npm provenance, so this job does not
+claim or request it. Credentials are exposed only to the authentication/dry-run
+and publication steps, not to dependency installation or package tests.
+Network errors and already published versions fail closed. Normal pushes and
+manual runs with a blank npm version cannot publish to npm.
 The binary matrix builds eight standalone targets: Linux glibc and musl, macOS,
 and Windows, each for x64 and arm64. Linux/macOS assets are compressed as
 `.tar.gz`; Windows assets use `.zip`. All eight archives appear in the release

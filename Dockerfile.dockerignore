@@ -1,0 +1,8 @@
+# Only the production compiler inputs may enter the build context.
+*
+!Dockerfile
+!package.json
+!bun.lock
+!tsconfig.json
+!src/
+!src/**

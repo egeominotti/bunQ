@@ -4,6 +4,7 @@ import { executeCommand } from './client';
 import { executeBackupCommand, isBackupCommand } from './commands/backup';
 import { formatDoctorText, runDoctor } from './commands/doctor';
 import { runServer } from './commands/server';
+import { runHealthcheck } from './commands/healthcheck';
 import {
   renderCronAddHelp,
   renderHelp,
@@ -41,6 +42,10 @@ async function executeLocalCommand(
   port: number,
   json: boolean
 ): Promise<boolean> {
+  if (command === 'healthcheck') {
+    process.exit(await runHealthcheck(args));
+  }
+
   if (command === 'version') {
     const info = await collectVersionInfo(host, port + 1);
     finish(

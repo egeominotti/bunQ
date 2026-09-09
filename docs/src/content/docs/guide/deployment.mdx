@@ -346,6 +346,32 @@ The same release is available as `ghcr.io/egeominotti/bunqueue:2.9.5`.
 Both registries provide Linux amd64 and arm64 images. The volume preserves SQLite
 data across container replacement. Pin a version or digest for deployments.
 
+Choose `2.9.5-alpine`, `2.9.5-debian`, `2.9.5-slim`, or `2.9.5-distroless`.
+The moving tags are `alpine`, `debian`, `slim`, and `distroless`. Unsuffixed version
+tags and `latest` continue to select Alpine. All variants support amd64 and arm64,
+run as UID/GID `1001:1001`, and share the same ports and persistent data path.
+Alpine uses musl; Debian and Debian slim use glibc. Distroless uses Debian 13 and
+contains no shell or package manager. Each image contains the compiled server,
+required system libraries, and CA certificates, without project dependencies or
+a separate Bun installation.
+
+The exec-form health check runs `/app/bunqueue healthcheck`. It requests
+`http://127.0.0.1:$HTTP_PORT/health` (default port `6790`), requires a healthy JSON
+response, and fails after five seconds. It works with server authentication enabled.
+If you change the listener using a config file or CLI flags, use a custom hostname,
+or enable HTTPS, override the probe with the matching URL. For distroless, use a
+derived Dockerfile with JSON exec form:
+
+```dockerfile
+FROM egeominotti/bunqueue:2.9.5-distroless
+HEALTHCHECK CMD ["/app/bunqueue", "healthcheck", "https://broker.example:8443/health"]
+```
+
+HTTPS probes verify certificates. The URL must match the certificate and use a
+trusted CA. The HTTP probe does not support Unix sockets; socket-only deployments
+must configure their own health check. Bind-mounted data directories must be
+writable by UID `1001`.
+
 To package your own application with bunqueue, build an image from your project:
 
 ```dockerfile

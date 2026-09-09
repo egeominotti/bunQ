@@ -89,6 +89,22 @@ version, `latest`, commit SHA, and timestamp tags. Each image supports
 Pin a version or digest for reproducible deployments. Confirm a tag exists with
 `docker buildx imagetools inspect egeominotti/bunqueue:<tag>` before using it.
 
+Choose a Linux distribution with the same tags on either registry:
+
+| Variant | Version tag | Moving tag | Runtime base |
+|---|---|---|---|
+| Alpine (default) | `2.9.5-alpine` | `alpine`, `latest` | Alpine 3.22, musl |
+| Debian | `2.9.5-debian` | `debian` | Debian 13 |
+| Debian slim | `2.9.5-slim` | `slim` | Debian 13 slim |
+| Distroless | `2.9.5-distroless` | `distroless` | Debian 13, no shell or package manager |
+
+Every variant supports both architectures, runs as UID/GID `1001:1001`, and
+stores SQLite data in `/app/data`. Unsuffixed tags such as `2.9.5` stay on Alpine.
+Production images contain the compiled server and required system libraries;
+development dependencies and a separate Bun installation stay out of the image.
+The built-in health check uses `/app/bunqueue healthcheck`, including on distroless.
+See the [deployment guide](https://bunqueue.dev/guide/deployment/) for custom probes.
+
 Prefer a standalone executable? [GitHub releases](https://github.com/egeominotti/bunqueue/releases)
 include the Bun runtime, so no Bun or Node.js installation is needed. From 2.9.5,
 the eight downloads are:

@@ -39,5 +39,6 @@ export const CLI_LOCAL_COMMAND_SURFACE = {
   start: [],
   version: [],
   doctor: [],
+  healthcheck: [],
   backup: ['now', 'create', 'list', 'restore', 'status'],
 } as const;

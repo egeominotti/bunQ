@@ -1,63 +1,41 @@
-# ============================================
-# bunQ Dockerfile
-# Multi-stage build for optimal image size
-# ============================================
-
-# Stage 1: Build
-FROM oven/bun:1.4.2-alpine AS builder
-
+# syntax=docker/dockerfile:1
+ARG VARIANT=alpine
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.2 AS builder
+ARG TARGETARCH
+ARG VARIANT
 WORKDIR /app
-
-# Copy package files
-COPY package.json bun.lock* ./
-
-# Install dependencies (ignore prepare script - no git in container)
+COPY package.json bun.lock ./
+# Development tools exist only in this build stage.
 RUN bun install --frozen-lockfile --ignore-scripts
-
-# Copy source code
 COPY src/ ./src/
 COPY tsconfig.json ./
-
-# Type check
 RUN bun run typecheck
+RUN case "$TARGETARCH" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) exit 1 ;; esac; \
+    case "$VARIANT" in alpine) libc=-musl ;; debian|slim|distroless) libc= ;; *) exit 1 ;; esac; \
+    bun build --compile --minify --target="bun-linux-${arch}${libc}" src/main.ts --outfile bunqueue
+RUN mkdir /app/data
 
-# Build single executable
-RUN bun build --compile --minify src/main.ts --outfile bunqueue
+FROM alpine:3.22 AS alpine-base
+RUN apk add --no-cache ca-certificates libgcc libstdc++
 
-# ============================================
-# Stage 2: Production
-FROM oven/bun:1.4.2-alpine AS production
+FROM debian:trixie AS debian-base
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
 
+FROM debian:trixie-slim AS slim-base
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM gcr.io/distroless/cc-debian13:nonroot AS distroless-base
+
+FROM ${VARIANT}-base AS production
 WORKDIR /app
-
-# Create non-root user for security
-RUN addgroup -g 1001 bunqueue && \
-    adduser -D -u 1001 -G bunqueue bunqueue
-
-# Create data directory
-RUN mkdir -p /app/data && chown -R bunqueue:bunqueue /app
-
-# Copy built executable from builder
-COPY --from=builder --chown=bunqueue:bunqueue /app/bunqueue ./bunqueue
-
-# Switch to non-root user
-USER bunqueue
-
-# Environment variables
-ENV TCP_PORT=6789
-ENV HTTP_PORT=6790
-ENV DATA_PATH=/app/data/bunqueue.db
-ENV NODE_ENV=production
-
-# Expose ports
+COPY --from=builder --chown=1001:1001 /app/bunqueue /app/bunqueue
+COPY --from=builder --chown=1001:1001 /app/data /app/data
+USER 1001:1001
+ENV TCP_PORT=6789 HTTP_PORT=6790 DATA_PATH=/app/data/bunqueue.db NODE_ENV=production
 EXPOSE 6789 6790
-
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:6790/health || exit 1
-
-# Volume for persistent data
+    CMD ["/app/bunqueue", "healthcheck"]
 VOLUME ["/app/data"]
-
-# Run the server
-ENTRYPOINT ["./bunqueue"]
+ENTRYPOINT ["/app/bunqueue"]

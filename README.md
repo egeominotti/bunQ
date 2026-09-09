@@ -63,7 +63,7 @@ bunx bunqueue start --data-path ./data/bunq.db   # TCP :6789, HTTP :6790
 # or, with no runtime at all (the volume persists /app/data):
 docker run -d -p 6789:6789 -p 6790:6790 \
   -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:latest
+  egeominotti/bunqueue:latest
 ```
 
 For multiple active brokers, the repository includes a topology pinned to
@@ -82,12 +82,31 @@ is not supported. CI validates PostgreSQL 15, 16, 17, and the pinned/recommended
 18.6 release. See the
 [storage guide](https://bunqueue.dev/guide/databases/).
 
-Every completed release publishes `ghcr.io/egeominotti/bunqueue` with the exact
-version tag alongside `latest`, the commit SHA and a build timestamp, so pin the
-version tag for reproducible deployments. Confirm the tag exists before pinning
-it, because a release whose pipeline does not complete pushes no image;
-`docker buildx imagetools inspect ghcr.io/egeominotti/bunqueue:<tag>` resolves
-the digest.
+Starting with 2.9.5, completed releases publish to both Docker Hub
+(`egeominotti/bunqueue`) and GHCR (`ghcr.io/egeominotti/bunqueue`), with matching
+version, `latest`, commit SHA, and timestamp tags. Each image supports
+`linux/amd64` and `linux/arm64`; Docker selects the matching architecture.
+Pin a version or digest for reproducible deployments. Confirm a tag exists with
+`docker buildx imagetools inspect egeominotti/bunqueue:<tag>` before using it.
+
+Prefer a standalone executable? [GitHub releases](https://github.com/egeominotti/bunqueue/releases)
+include the Bun runtime, so no Bun or Node.js installation is needed. From 2.9.5,
+the eight downloads are:
+
+| System | Architecture | Archive |
+|---|---|---|
+| Linux (glibc) | x64 | `bunqueue-linux-x64.tar.gz` |
+| Linux (glibc) | arm64 | `bunqueue-linux-arm64.tar.gz` |
+| Linux (musl / Alpine) | x64 | `bunqueue-linux-x64-musl.tar.gz` |
+| Linux (musl / Alpine) | arm64 | `bunqueue-linux-arm64-musl.tar.gz` |
+| macOS | x64 / Intel | `bunqueue-darwin-x64.tar.gz` |
+| macOS | arm64 / Apple Silicon | `bunqueue-darwin-arm64.tar.gz` |
+| Windows | x64 | `bunqueue-windows-x64.zip` |
+| Windows | arm64 | `bunqueue-windows-arm64.zip` |
+
+Extract the archive for your operating system and architecture, and verify it
+against the release's `SHA256SUMS`. See the
+[installation guide](https://bunqueue.dev/guide/installation/#single-binary-no-bun-required).
 
 Then produce and process from the language you already use:
 
@@ -182,7 +201,7 @@ await queue.add('welcome', { to: 'user@example.com' });
 ```bash
 docker run -d -p 6789:6789 -p 6790:6790 \
   -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:latest
+  egeominotti/bunqueue:latest
 ```
 
 ```typescript

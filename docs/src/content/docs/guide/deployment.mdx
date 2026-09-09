@@ -333,6 +333,21 @@ topology spread or anti-affinity appropriate to your node count.
 
 ## Docker
 
+For the prebuilt server, use Docker Hub (available from 2.9.5):
+
+```bash
+docker run -d --name bunqueue \
+  -p 6789:6789 -p 6790:6790 \
+  -v bunqueue-data:/app/data \
+  egeominotti/bunqueue:2.9.5
+```
+
+The same release is available as `ghcr.io/egeominotti/bunqueue:2.9.5`.
+Both registries provide Linux amd64 and arm64 images. The volume preserves SQLite
+data across container replacement. Pin a version or digest for deployments.
+
+To package your own application with bunqueue, build an image from your project:
+
 ```dockerfile
 FROM oven/bun:1.4.2-alpine
 

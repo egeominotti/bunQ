@@ -717,6 +717,20 @@ transitively downstream; Docker publication also waits for the complete binary
 matrix. Each successful Docker release publishes the exact package version
 alongside `latest`, the commit SHA, and a timestamp, so production deployments
 can pin the same version as npm without losing the moving convenience tag.
+The same multi-platform build (`linux/amd64` and `linux/arm64`) publishes these
+tags to both `ghcr.io/egeominotti/bunqueue` and `docker.io/egeominotti/bunqueue`.
+Docker Hub authentication uses the GitHub Actions repository secrets
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`; the token must have write access to
+`egeominotti/bunqueue`. GHCR continues to use `GITHUB_TOKEN`. A Docker Hub login
+or push failure fails the Docker job and blocks the downstream GitHub release.
+Adding credentials or changing the workflow does not publish an already released
+version: the existing version gate still requires a new package version on main.
+The binary matrix builds eight standalone targets: Linux glibc and musl, macOS,
+and Windows, each for x64 and arm64. Linux/macOS assets are compressed as
+`.tar.gz`; Windows assets use `.zip`. All eight archives appear in the release
+download table and `SHA256SUMS`. Missing binaries or unmatched release assets
+fail publication rather than producing an incomplete release. Cross-compilation
+alone does not establish native runtime compatibility on each target.
 `test/repro-release-sdk-gate.test.ts` locks both the version and `latest` tags.
 The TypeScript package publisher is manual, runs the same reusable
 six-SDK gate, uses frozen installs and pinned Bun, publishes with `bun publish`,

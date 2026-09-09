@@ -14,7 +14,7 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
-## Unreleased
+## [2.9.5] - 2026-09-09
 
 ### Canonical client parity
 
@@ -38,6 +38,13 @@ head:
 
 ### CI/CD
 
+- Add standalone Windows arm64 and Linux musl x64/arm64 release binaries,
+  completing the eight primary Bun targets. Require all eight compressed assets
+  before publishing the release and include their SHA-256 checksums.
+- Publish release images to Docker Hub at `egeominotti/bunqueue` alongside
+  GHCR, with matching version, latest, commit, and timestamp tags for amd64 and arm64.
+- Update the README and installation/deployment guides with Docker Hub commands,
+  the eight standalone downloads, and runtime and persistence requirements.
 - Pin Bun to 1.4.2 across CI, SDK workflows, release images, and disposable test
   images; align deployment examples and the release-gate regression check.
 

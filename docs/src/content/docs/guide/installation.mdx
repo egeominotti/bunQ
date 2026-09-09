@@ -19,7 +19,8 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 ## Requirements
 
 - The `bunqueue` server and embedded runtime require [Bun](https://bun.sh)
-  v1.4.0 or later.
+  v1.4.0 or later when run from the package. Standalone executables and Docker
+  images already include the runtime.
 - External Node.js, Deno, Python, PHP, Go, Rust, and Elixir clients need their
   SDK's documented runtime plus a reachable Bun-powered bunqueue server; they
   do not require Bun in the client process.
@@ -236,12 +237,46 @@ bunqueue --version
 bunqueue start
 ```
 
+## Docker (runtime included)
+
+From 2.9.5, release images are available on Docker Hub as `egeominotti/bunqueue`
+and on GHCR as `ghcr.io/egeominotti/bunqueue`. Both provide Linux amd64 and arm64
+images under the same tag; Docker selects the appropriate architecture.
+
+```bash
+docker run -d --name bunqueue \
+  -p 6789:6789 -p 6790:6790 \
+  -v bunqueue-data:/app/data \
+  egeominotti/bunqueue:2.9.5
+
+curl http://localhost:6790/health
+```
+
+The named volume persists SQLite data at `/app/data`. TCP clients connect to port
+6789; HTTP endpoints use port 6790. Use a version tag or digest for deployments;
+`latest` follows the most recently published release.
+
 ## Single binary (no Bun required)
 
 Each release ships self-contained executables, useful on servers and edge devices (Raspberry Pi, ARM64 boxes) where you don't want to install a runtime:
 
+Starting with 2.9.5, choose one of eight archives from
+[GitHub releases](https://github.com/egeominotti/bunqueue/releases):
+
+| Operating system | Architecture | Archive |
+|---|---|---|
+| Linux (glibc) | x64 | `bunqueue-linux-x64.tar.gz` |
+| Linux (glibc) | arm64 | `bunqueue-linux-arm64.tar.gz` |
+| Linux (musl / Alpine) | x64 | `bunqueue-linux-x64-musl.tar.gz` |
+| Linux (musl / Alpine) | arm64 | `bunqueue-linux-arm64-musl.tar.gz` |
+| macOS | x64 / Intel | `bunqueue-darwin-x64.tar.gz` |
+| macOS | arm64 / Apple Silicon | `bunqueue-darwin-arm64.tar.gz` |
+| Windows | x64 | `bunqueue-windows-x64.zip` |
+| Windows | arm64 | `bunqueue-windows-arm64.zip` |
+
+For example, on Linux arm64 with glibc:
+
 ```bash
-# Platforms: linux-x64 | linux-arm64 | darwin-x64 | darwin-arm64 (windows-x64 ships as a .zip)
 curl -fsSLO https://github.com/egeominotti/bunqueue/releases/latest/download/bunqueue-linux-arm64.tar.gz
 tar -xzf bunqueue-linux-arm64.tar.gz
 sudo mv bunqueue-linux-arm64 /usr/local/bin/bunqueue
@@ -250,6 +285,8 @@ bunqueue start --data-path /var/lib/bunqueue/queue.db
 ```
 
 A `SHA256SUMS` file is attached to every release for checksum verification.
+Download it from the same release as your archive. On Windows, extract the ZIP
+and run `bunqueue-windows-x64.exe` or `bunqueue-windows-arm64.exe`.
 
 The binary is the full server + CLI. For the client SDK in your app code you still install the package (`bun add bunqueue`).
 

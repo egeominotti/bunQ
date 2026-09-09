@@ -301,7 +301,7 @@ jobs:
 
   # ============================================
   # Version gate — only build binaries / cut a release when package.json
-  # version is NEW (avoids rebuilding 5×~90MB binaries + a fresh release on
+  # version is NEW (avoids rebuilding 8×~90MB binaries + a fresh release on
   # every docs/chore commit to main, which never bumps the version).
   # ============================================
   version-gate:
@@ -347,12 +347,18 @@ jobs:
             artifact: bunqueue-linux-x64
           - target: bun-linux-arm64
             artifact: bunqueue-linux-arm64
+          - target: bun-linux-x64-musl
+            artifact: bunqueue-linux-x64-musl
+          - target: bun-linux-arm64-musl
+            artifact: bunqueue-linux-arm64-musl
           - target: bun-darwin-x64
             artifact: bunqueue-darwin-x64
           - target: bun-darwin-arm64
             artifact: bunqueue-darwin-arm64
           - target: bun-windows-x64
             artifact: bunqueue-windows-x64.exe
+          - target: bun-windows-arm64
+            artifact: bunqueue-windows-arm64.exe
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -410,11 +416,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Generate tags
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            docker.io/egeominotti/bunqueue
           tags: |
             type=raw,value=${{ needs.version-gate.outputs.version }}
             type=raw,value=latest
@@ -469,24 +484,23 @@ jobs:
 
           # Collect binaries (artifacts may be nested one level depending on the
           # upload-artifact version), keeping the canonical names.
-          for name in bunqueue-linux-x64 bunqueue-linux-arm64 bunqueue-darwin-x64 bunqueue-darwin-arm64 bunqueue-windows-x64.exe; do
-            cp "artifacts/$name" release/ 2>/dev/null || cp "artifacts/$name/$name" release/ 2>/dev/null || true
+          for name in bunqueue-linux-x64 bunqueue-linux-arm64 bunqueue-linux-x64-musl bunqueue-linux-arm64-musl bunqueue-darwin-x64 bunqueue-darwin-arm64 bunqueue-windows-x64.exe bunqueue-windows-arm64.exe; do
+            cp "artifacts/$name" release/ 2>/dev/null || cp "artifacts/$name/$name" release/
           done
 
           # Compress each binary before upload: a Bun --compile binary embeds the
           # whole runtime (~60–94MB) but compresses ~55–65%, so the DOWNLOAD drops
           # to ~30–40MB. Unix → .tar.gz (preserves the +x bit), Windows → .zip.
           cd release
-          for name in bunqueue-linux-x64 bunqueue-linux-arm64 bunqueue-darwin-x64 bunqueue-darwin-arm64; do
-            [ -f "$name" ] || continue
+          for name in bunqueue-linux-x64 bunqueue-linux-arm64 bunqueue-linux-x64-musl bunqueue-linux-arm64-musl bunqueue-darwin-x64 bunqueue-darwin-arm64; do
             chmod +x "$name"
             tar -czf "$name.tar.gz" "$name"
             rm "$name"
           done
-          if [ -f bunqueue-windows-x64.exe ]; then
-            zip -9 bunqueue-windows-x64.zip bunqueue-windows-x64.exe
-            rm bunqueue-windows-x64.exe
-          fi
+          for name in bunqueue-windows-x64 bunqueue-windows-arm64; do
+            zip -9 "$name.zip" "$name.exe"
+            rm "$name.exe"
+          done
 
           # Checksums of the published (compressed) artifacts.
           sha256sum bunqueue-* > SHA256SUMS
@@ -501,12 +515,16 @@ jobs:
           draft: false
           prerelease: false
           make_latest: true
+          fail_on_unmatched_files: true
           files: |
             release/bunqueue-linux-x64.tar.gz
             release/bunqueue-linux-arm64.tar.gz
+            release/bunqueue-linux-x64-musl.tar.gz
+            release/bunqueue-linux-arm64-musl.tar.gz
             release/bunqueue-darwin-x64.tar.gz
             release/bunqueue-darwin-arm64.tar.gz
             release/bunqueue-windows-x64.zip
+            release/bunqueue-windows-arm64.zip
             release/SHA256SUMS
           body: |
             ## Installation
@@ -529,9 +547,12 @@ jobs:
             |----------|-------------|----------|
             | Linux | x64 | `bunqueue-linux-x64.tar.gz` |
             | Linux | arm64 | `bunqueue-linux-arm64.tar.gz` |
+            | Linux (musl / Alpine) | x64 | `bunqueue-linux-x64-musl.tar.gz` |
+            | Linux (musl / Alpine) | arm64 | `bunqueue-linux-arm64-musl.tar.gz` |
             | macOS | x64 (Intel) | `bunqueue-darwin-x64.tar.gz` |
             | macOS | arm64 (Apple Silicon) | `bunqueue-darwin-arm64.tar.gz` |
             | Windows | x64 | `bunqueue-windows-x64.zip` |
+            | Windows | arm64 | `bunqueue-windows-arm64.zip` |
 
             ```bash
             # Example: Linux x64

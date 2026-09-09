@@ -14,6 +14,7 @@ const qualityJobs = [
 ] as const;
 
 type Job = {
+  strategy?: { matrix?: { include?: Array<{ target: string; artifact: string }> } };
   if?: string;
   needs?: string | string[];
   'runs-on'?: string;
@@ -148,6 +149,58 @@ describe('release graph SDK gate', () => {
 
     expect(tags).toContain('type=raw,value=${{ needs.version-gate.outputs.version }}');
     expect(tags).toContain('type=raw,value=latest');
+  });
+
+  test('Docker publication authenticates and tags both registries', () => {
+    const steps = ci.jobs.docker?.steps ?? [];
+    const hubLogin = steps.find((step) => step.with?.registry === 'docker.io');
+    expect(hubLogin?.uses).toBe('docker/login-action@v3');
+    expect(hubLogin?.with?.username).toBe('${{ secrets.DOCKERHUB_USERNAME }}');
+    expect(hubLogin?.with?.password).toBe('${{ secrets.DOCKERHUB_TOKEN }}');
+    expect(steps.find((step) => step.name === 'Log in to Container Registry')?.with?.password).toBe(
+      '${{ secrets.GITHUB_TOKEN }}'
+    );
+    const metadata = steps.find((step) => step.uses === 'docker/metadata-action@v5');
+    expect(String(metadata?.with?.images).trim().split('\n')).toEqual([
+      '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}',
+      'docker.io/egeominotti/bunqueue',
+    ]);
+    const publish = steps.find((step) => step.uses === 'docker/build-push-action@v6');
+    expect(publish?.with?.platforms).toBe('linux/amd64,linux/arm64');
+    expect(publish?.with?.tags).toBe('${{ steps.meta.outputs.tags }}');
+    expect(publish?.with?.push).toBe(true);
+    expect(steps.indexOf(hubLogin!)).toBeLessThan(steps.indexOf(publish!));
+  });
+
+  test('all eight executable targets have matching published archives', () => {
+    const targets = [
+      'linux-x64',
+      'linux-arm64',
+      'linux-x64-musl',
+      'linux-arm64-musl',
+      'darwin-x64',
+      'darwin-arm64',
+      'windows-x64',
+      'windows-arm64',
+    ];
+    const matrix = ci.jobs.build?.strategy?.matrix?.include ?? [];
+    expect(matrix.map((entry) => entry.target).sort()).toEqual(
+      targets.map((target) => `bun-${target}`).sort()
+    );
+    const release = ci.jobs.release?.steps?.find(
+      (step) => step.uses === 'softprops/action-gh-release@v2'
+    );
+    expect(release?.with?.fail_on_unmatched_files).toBe(true);
+    const files = String(release?.with?.files).trim().split('\n');
+    expect(files).toHaveLength(9);
+    for (const target of targets) {
+      const windows = target.startsWith('windows-');
+      expect(matrix.find((entry) => entry.target === `bun-${target}`)?.artifact).toBe(
+        `bunqueue-${target}${windows ? '.exe' : ''}`
+      );
+      expect(files).toContain(`release/bunqueue-${target}${windows ? '.zip' : '.tar.gz'}`);
+    }
+    expect(files).toContain('release/SHA256SUMS');
   });
 
   test('finite edge mutations are all detected', () => {
